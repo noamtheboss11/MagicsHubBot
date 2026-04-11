@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import aiohttp
 
@@ -39,16 +40,20 @@ async def self_ping_loop(settings: Settings) -> None:
 
 async def main() -> None:
     load_dotenv()
-    settings = Settings.from_env()
-    configure_logging(settings.log_level)
+    configure_logging(os.getenv("LOG_LEVEL", "INFO"))
 
-    ping_task = asyncio.create_task(self_ping_loop(settings), name="self-ping-loop")
     try:
-        async with SalesBot(settings) as bot:
-            await bot.start(settings.discord_token)
-    finally:
-        ping_task.cancel()
-        await asyncio.gather(ping_task, return_exceptions=True)
+        settings = Settings.from_env()
+        ping_task = asyncio.create_task(self_ping_loop(settings), name="self-ping-loop")
+        try:
+            async with SalesBot(settings) as bot:
+                await bot.start(settings.discord_token)
+        finally:
+            ping_task.cancel()
+            await asyncio.gather(ping_task, return_exceptions=True)
+    except Exception:
+        LOGGER.exception("Startup failed")
+        raise
 
 
 if __name__ == "__main__":
