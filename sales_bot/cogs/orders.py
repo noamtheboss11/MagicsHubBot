@@ -57,13 +57,13 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @admin_only()
     async def list_orders(self, interaction: discord.Interaction) -> None:
-        async def send_panel_message(message: str, *, view: discord.ui.View | None = None) -> None:
+        async def send_acknowledgement(message: str) -> None:
             responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
             try:
-                await responder(message, view=view, ephemeral=True)
+                await responder(message, ephemeral=True)
             except discord.HTTPException as exc:
                 if exc.code == 40060:
-                    await interaction.followup.send(message, view=view, ephemeral=True)
+                    await interaction.followup.send(message, ephemeral=True)
                     return
                 if exc.code == 10062:
                     return
@@ -71,7 +71,7 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
 
         orders = await self.bot.services.orders.list_active_requests()
         if not orders:
-            await send_panel_message("אין כרגע הזמנות פעילות.")
+            await send_acknowledgement("אין כרגע הזמנות פעילות.")
             return
 
         async def on_selected(
@@ -117,7 +117,15 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
             value_getter=lambda order: str(order.id),
             on_selected=on_selected,
         )
-        await send_panel_message(
+        try:
+            owner_dm = interaction.user.dm_channel or await interaction.user.create_dm()
+            await owner_dm.send(
+                "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
+                view=view,
+            )
+        except discord.HTTPException as exc:
+            raise ExternalServiceError("לא הצלחתי לשלוח את רשימת ההזמנות ל-DM שלך.") from exc
+
+        await send_acknowledgement(
             "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
-            view=view,
         )
