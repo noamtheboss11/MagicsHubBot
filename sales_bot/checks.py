@@ -37,7 +37,7 @@ def linked_roblox_required() -> app_commands.Check:
         try:
             await sales_bot.services.oauth.get_link(interaction.user.id)
         except Exception:
-            raise app_commands.CheckFailure("כדי להשתמש בפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `/link`.")
+            raise app_commands.CheckFailure("כדי להשתמש בפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `link/`.")
 
         return True
 

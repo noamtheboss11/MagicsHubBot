@@ -82,7 +82,7 @@ class PaymentsCog(commands.Cog):
 
         systems = await self.bot.services.systems.list_robux_enabled_systems()
         if not systems:
-            await interaction.response.send_message("כרגע אין מערכות עם גיימפאס Roblox מוגדר.", ephemeral=True)
+            await interaction.response.send_message("כרגע אין מערכות עם גיימפאס מוגדר.", ephemeral=True)
             return
 
         async def on_selected(

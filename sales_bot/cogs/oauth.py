@@ -23,11 +23,11 @@ class OAuthCog(commands.Cog):
         state = await self.bot.services.oauth.create_state(interaction.user.id)
         authorization_url = self.bot.services.oauth.build_authorization_url(state)
 
-        embed = discord.Embed(title="קישור חשבון Roblox", color=discord.Color.blurple())
-        embed.description = "לחץ על הכפתור למטה כדי לקשר את חשבון הרובלוקס שלך. אחרי האישור, הבוט ישמור את החשבון המקושר שלך."
+        embed = discord.Embed(title="קישור חשבון רובלוקס", color=discord.Color.blurple())
+        embed.description = "לחץ על הכפתור למטה כדי לקשר את חשבון הרובלוקס שלך. אחרי האישור, הבוט ישמור את החשבון המקושר שלך. (שים לב שלא יהיה ניתן להוריד את החשבון אחר כך)"
 
         view = discord.ui.View()
-        view.add_item(discord.ui.Button(label="קשר Roblox", style=discord.ButtonStyle.link, url=authorization_url))
+        view.add_item(discord.ui.Button(label="קשר חשבון", style=discord.ButtonStyle.link, url=authorization_url))
         await interaction.response.send_message(embed=embed, view=view, ephemeral=interaction.guild is not None)
 
 
