@@ -139,12 +139,11 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
         )
 
         if interaction.guild is None:
-            sent = await send_panel_once(
+            await send_panel_once(
                 "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
                 view,
             )
-            if sent:
-                return
+            return
 
         try:
             owner_dm = interaction.user.dm_channel or await interaction.user.create_dm()
