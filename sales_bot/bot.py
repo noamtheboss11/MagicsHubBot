@@ -131,16 +131,21 @@ class SalesBot(commands.Bot):
         error: app_commands.AppCommandError,
     ) -> None:
         original_error = getattr(error, "original", error)
-        LOGGER.exception("Application command error", exc_info=original_error)
+        LOGGER.exception("Application command error", exc_info=(type(original_error), original_error, original_error.__traceback__))
 
         if isinstance(original_error, PermissionDeniedError):
             message = str(original_error)
         elif isinstance(original_error, SalesBotError):
             message = str(original_error)
+        elif isinstance(error, app_commands.CheckFailure):
+            message = str(error) or "You cannot use that command."
         elif isinstance(error, app_commands.CommandOnCooldown):
             message = f"Try again in {error.retry_after:.1f} seconds."
         else:
             message = "An unexpected error occurred while processing that command."
 
         responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-        await responder(message, ephemeral=True)
+        try:
+            await responder(message, ephemeral=True)
+        except discord.HTTPException:
+            LOGGER.exception("Failed to send interaction error response")

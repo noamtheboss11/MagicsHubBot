@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from discord import app_commands
-
-from sales_bot.exceptions import PermissionDeniedError
 
 if TYPE_CHECKING:
     import discord
@@ -15,12 +13,14 @@ if TYPE_CHECKING:
 def admin_only() -> app_commands.Check:
     async def predicate(interaction: discord.Interaction) -> bool:
         bot = interaction.client
-        if not isinstance(bot, SalesBot):
-            return False
+        if not hasattr(bot, "services"):
+            raise app_commands.CheckFailure("Bot services are not ready yet. Try again in a moment.")
 
-        if await bot.services.admins.is_admin(interaction.user.id):
+        sales_bot = cast("SalesBot", bot)
+
+        if await sales_bot.services.admins.is_admin(interaction.user.id):
             return True
 
-        raise PermissionDeniedError("Only bot admins can use this command.")
+        raise app_commands.CheckFailure("Only bot admins can use this command.")
 
     return app_commands.check(predicate)
