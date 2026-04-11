@@ -53,6 +53,8 @@ class Settings:
     log_level: str
     sync_commands_on_startup: bool
     dev_guild_id: int | None
+    self_ping_enabled: bool
+    self_ping_interval_seconds: int
 
     @property
     def roblox_oauth_enabled(self) -> bool:
@@ -97,6 +99,8 @@ class Settings:
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),
             dev_guild_id=_optional_int("DEV_GUILD_ID"),
+            self_ping_enabled=_optional_bool("SELF_PING_ENABLED", True),
+            self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
 
         settings.data_dir.mkdir(parents=True, exist_ok=True)

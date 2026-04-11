@@ -135,6 +135,8 @@ Optional values:
 - `LOG_LEVEL`
 - `SYNC_COMMANDS_ON_STARTUP`
 - `DEV_GUILD_ID`
+- `SELF_PING_ENABLED`
+- `SELF_PING_INTERVAL_SECONDS`
 
 If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
 
@@ -146,6 +148,11 @@ Render Web Service settings:
 - Start command: `python main.py`
 
 The app now falls back to Render's `PORT` environment variable automatically, so `WEB_PORT=$PORT` is no longer required in the start command.
+
+The bot also supports a background self-ping loop using `PUBLIC_BASE_URL`. By default it pings `/health` every 180 seconds. You can control that with:
+
+- `SELF_PING_ENABLED=true|false`
+- `SELF_PING_INTERVAL_SECONDS=180`
 
 ## Running In Visual Studio Code
 
