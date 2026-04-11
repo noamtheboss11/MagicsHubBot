@@ -6,6 +6,7 @@ from typing import Any
 import discord
 
 from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
+from sales_bot.models import OrderRequestRecord
 from sales_bot.ui.common import RestrictedView
 
 
@@ -17,6 +18,23 @@ class OrderDraft:
     offered_price: str
 
 
+ORDER_STATUS_LABELS = {
+    "pending": "ממתינה",
+    "accepted": "התקבלה",
+    "rejected": "נדחתה",
+    "completed": "הושלמה",
+}
+
+
+def draft_from_order(order: OrderRequestRecord) -> OrderDraft:
+    return OrderDraft(
+        requested_item=order.requested_item,
+        required_timeframe=order.required_timeframe,
+        payment_method=order.payment_method,
+        offered_price=order.offered_price,
+    )
+
+
 def build_order_embed(title: str, draft: OrderDraft, *, user: discord.abc.User | None = None) -> discord.Embed:
     embed = discord.Embed(title=title, color=discord.Color.gold())
     if user is not None:
@@ -25,6 +43,29 @@ def build_order_embed(title: str, draft: OrderDraft, *, user: discord.abc.User |
     embed.add_field(name="תוך כמה זמן אתה צריך את זה", value=draft.required_timeframe, inline=False)
     embed.add_field(name="איך אתה משלם", value=draft.payment_method, inline=False)
     embed.add_field(name="כמה אתה מוכן לשלם", value=draft.offered_price, inline=False)
+    return embed
+
+
+def _upsert_embed_field(embed: discord.Embed, *, name: str, value: str) -> None:
+    for index, field in enumerate(embed.fields):
+        if field.name == name:
+            embed.set_field_at(index, name=name, value=value, inline=False)
+            return
+    embed.add_field(name=name, value=value, inline=False)
+
+
+def build_order_record_embed(
+    title: str,
+    order: OrderRequestRecord,
+    *,
+    user: discord.abc.User | None = None,
+    rejection_reason: str | None = None,
+) -> discord.Embed:
+    embed = build_order_embed(title, draft_from_order(order), user=user)
+    _upsert_embed_field(embed, name="סטטוס", value=ORDER_STATUS_LABELS.get(order.status, order.status))
+    if rejection_reason:
+        _upsert_embed_field(embed, name="סיבת דחייה", value=rejection_reason)
+    embed.set_footer(text=f"מספר הזמנה: {order.id}")
     return embed
 
 
@@ -201,7 +242,20 @@ class OrderDecisionView(RestrictedView):
         )
         try:
             requester = await self.bot.fetch_user(self.requester_id)
-            await requester.send(decision_text)
+            if action == "reject":
+                rejected_embed = build_order_embed(
+                    "פרטי ההזמנה שנדחתה",
+                    OrderDraft(
+                        requested_item=order.requested_item,
+                        required_timeframe=order.required_timeframe,
+                        payment_method=order.payment_method,
+                        offered_price=order.offered_price,
+                    ),
+                )
+                rejected_embed.color = discord.Color.red()
+                await requester.send(decision_text, embed=rejected_embed)
+            else:
+                await requester.send(decision_text)
         except discord.HTTPException:
             pass
 
@@ -210,4 +264,209 @@ class OrderDecisionView(RestrictedView):
         embed.add_field(name="סטטוס", value="התקבל" if action == "accept" else "נדחה", inline=False)
         self.disable_all_items()
         await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
+
+
+class OrderManagementView(RestrictedView):
+    def __init__(self, bot: discord.Client, *, actor_id: int, order: OrderRequestRecord) -> None:
+        super().__init__(actor_id=actor_id, timeout=900)
+        self.bot = bot
+        self.order = order
+        self.message: discord.Message | None = None
+
+    async def _update_message(
+        self,
+        *,
+        interaction: discord.Interaction | None,
+        status: str,
+        rejection_reason: str | None = None,
+    ) -> None:
+        if self.message is None:
+            return
+
+        embed = self.message.embeds[0].copy() if self.message.embeds else build_order_record_embed("פרטי הזמנה פעילה", self.order)
+        embed.color = {
+            "completed": discord.Color.green(),
+            "rejected": discord.Color.red(),
+            "accepted": discord.Color.blurple(),
+        }.get(status, discord.Color.gold())
+        _upsert_embed_field(embed, name="סטטוס", value=ORDER_STATUS_LABELS.get(status, status))
+        if rejection_reason:
+            _upsert_embed_field(embed, name="סיבת דחייה", value=rejection_reason)
+        elif status != "rejected":
+            for index, field in enumerate(list(embed.fields)):
+                if field.name == "סיבת דחייה":
+                    embed.remove_field(index)
+                    break
+
+        self.disable_all_items()
+        if interaction is not None:
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await self.message.edit(embed=embed, view=self)
+
+    @discord.ui.button(label="Mark as Completed", style=discord.ButtonStyle.success)
+    async def complete_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        self.order = await self.bot.services.orders.resolve_request(
+            self.order.id,
+            reviewer_id=interaction.user.id,
+            status="completed",
+        )
+        await self._update_message(interaction=interaction, status="completed")
+        self.stop()
+
+    @discord.ui.button(label="Still working on it", style=discord.ButtonStyle.secondary)
+    async def working_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        await interaction.response.send_message("לא בוצע שינוי. ההזמנה נשארה פעילה ברשימה.", ephemeral=True)
+
+    @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger)
+    async def reject_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        await interaction.response.send_modal(
+            OrderRejectReasonModal(
+                self.bot,
+                actor_id=interaction.user.id,
+                order=self.order,
+                management_view=self,
+            )
+        )
+
+
+class OrderRejectReasonModal(discord.ui.Modal):
+    def __init__(
+        self,
+        bot: discord.Client,
+        *,
+        actor_id: int,
+        order: OrderRequestRecord,
+        management_view: OrderManagementView,
+        default_reason: str | None = None,
+    ) -> None:
+        super().__init__(title="סיבת דחיית ההזמנה")
+        self.bot = bot
+        self.actor_id = actor_id
+        self.order = order
+        self.management_view = management_view
+        self.reason_input = discord.ui.TextInput(
+            label="מה הסיבה לדחייה?",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            default=default_reason,
+        )
+        self.add_item(self.reason_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        reason = str(self.reason_input).strip()
+        preview_view = OrderRejectPreviewView(
+            self.bot,
+            actor_id=self.actor_id,
+            order=self.order,
+            reason=reason,
+            management_view=self.management_view,
+        )
+        embed = build_order_record_embed(
+            "תצוגה מקדימה של דחיית ההזמנה",
+            self.order,
+            rejection_reason=reason,
+        )
+        embed.color = discord.Color.red()
+        await interaction.response.send_message(
+            "בדוק את סיבת הדחייה לפני השליחה למשתמש.",
+            embed=embed,
+            view=preview_view,
+            ephemeral=True,
+        )
+
+
+class OrderRejectPreviewView(RestrictedView):
+    def __init__(
+        self,
+        bot: discord.Client,
+        *,
+        actor_id: int,
+        order: OrderRequestRecord,
+        reason: str,
+        management_view: OrderManagementView,
+    ) -> None:
+        super().__init__(actor_id=actor_id, timeout=300)
+        self.bot = bot
+        self.order = order
+        self.reason = reason
+        self.management_view = management_view
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        updated_order = await self.bot.services.orders.resolve_request(
+            self.order.id,
+            reviewer_id=interaction.user.id,
+            status="rejected",
+        )
+        self.management_view.order = updated_order
+
+        requester = await self.bot.fetch_user(updated_order.user_id)
+        requester_embed = build_order_record_embed(
+            "פרטי ההזמנה שנדחתה",
+            updated_order,
+            rejection_reason=self.reason,
+        )
+        requester_embed.color = discord.Color.red()
+        await requester.send(
+            f"ההזמנה האישית שלך נדחתה.\nסיבה: {self.reason}",
+            embed=requester_embed,
+        )
+
+        await self.management_view._update_message(
+            interaction=None,
+            status="rejected",
+            rejection_reason=self.reason,
+        )
+        await interaction.response.edit_message(
+            content="הדחייה נשלחה למשתמש בהצלחה.",
+            embed=requester_embed,
+            view=None,
+        )
+        self.stop()
+
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary)
+    async def edit_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        await interaction.response.send_modal(
+            OrderRejectReasonModal(
+                self.bot,
+                actor_id=interaction.user.id,
+                order=self.order,
+                management_view=self.management_view,
+                default_reason=self.reason,
+            )
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_button(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[Any],
+    ) -> None:
+        await interaction.response.edit_message(
+            content="שליחת הדחייה בוטלה. לא בוצעו שינויים בהזמנה.",
+            embed=None,
+            view=None,
+        )
         self.stop()

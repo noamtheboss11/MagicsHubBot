@@ -6,7 +6,9 @@ from discord.ext import commands
 
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
-from sales_bot.ui.orders import OrderPanelView
+from sales_bot.exceptions import ExternalServiceError
+from sales_bot.ui.common import PaginatedSelectView
+from sales_bot.ui.orders import OrderManagementView, OrderPanelView, build_order_record_embed
 
 
 class OrdersCog(commands.Cog):
@@ -43,3 +45,67 @@ class OrdersCog(commands.Cog):
 
 async def setup(bot: SalesBot) -> None:
     await bot.add_cog(OrdersCog(bot))
+    await bot.add_cog(OrderAdminCog(bot))
+
+
+class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="ניהול הזמנות"):
+    def __init__(self, bot: SalesBot) -> None:
+        self.bot = bot
+        super().__init__()
+
+    @app_commands.command(name="list", description="פתיחת רשימת ההזמנות הפעילות בתפריט בחירה.")
+    @admin_only()
+    async def list_orders(self, interaction: discord.Interaction) -> None:
+        orders = await self.bot.services.orders.list_active_requests()
+        if not orders:
+            await interaction.response.send_message("אין כרגע הזמנות פעילות.", ephemeral=True)
+            return
+
+        async def on_selected(
+            select_interaction: discord.Interaction,
+            order: object,
+            parent_view: PaginatedSelectView,
+        ) -> None:
+            selected_order = order
+            requester = None
+            try:
+                requester = await self.bot.fetch_user(selected_order.user_id)
+            except discord.HTTPException:
+                requester = None
+
+            embed = build_order_record_embed("פרטי הזמנה פעילה", selected_order, user=requester)
+            view = OrderManagementView(
+                self.bot,
+                actor_id=interaction.user.id,
+                order=selected_order,
+            )
+
+            try:
+                owner_dm = interaction.user.dm_channel or await interaction.user.create_dm()
+                dm_message = await owner_dm.send(embed=embed, view=view)
+            except discord.HTTPException as exc:
+                raise ExternalServiceError("לא הצלחתי לשלוח את פרטי ההזמנה ל-DM שלך.") from exc
+
+            view.message = dm_message
+            await select_interaction.response.edit_message(
+                content="ההזמנה נשלחה אליך ב-DM. אפשר לבחור הזמנה נוספת אם צריך.",
+                view=parent_view,
+            )
+
+        view = PaginatedSelectView(
+            actor_id=interaction.user.id,
+            items=orders,
+            placeholder="בחר הזמנה לפתיחה ב-DM",
+            option_builder=lambda order: discord.SelectOption(
+                label=f"Order #{order.id}"[:100],
+                description=f"{order.requested_item[:70]} | User {order.user_id}"[:100],
+                value=str(order.id),
+            ),
+            value_getter=lambda order: str(order.id),
+            on_selected=on_selected,
+        )
+        await interaction.response.send_message(
+            "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
+            view=view,
+            ephemeral=True,
+        )

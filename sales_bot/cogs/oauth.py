@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
-from sales_bot.exceptions import ConfigurationError
+from sales_bot.exceptions import ConfigurationError, NotFoundError
 
 
 class OAuthCog(commands.Cog):
@@ -37,6 +37,41 @@ class OAuthCog(commands.Cog):
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="קשר חשבון", style=discord.ButtonStyle.link, url=authorization_url))
         await interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
+
+    @app_commands.command(name="linkedaccount", description="הצגת חשבון הרובלוקס המקושר שלך.")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    async def linkedaccount(self, interaction: discord.Interaction) -> None:
+        try:
+            record = await self.bot.services.oauth.get_link(interaction.user.id)
+        except NotFoundError:
+            await interaction.response.send_message(
+                "אין כרגע חשבון רובלוקס מקושר למשתמש הזה. השתמש ב-`/link` כדי לקשר חשבון.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(title="החשבון המקושר שלך", color=discord.Color.blurple())
+        embed.add_field(name="Roblox User ID", value=record.roblox_sub, inline=False)
+        embed.add_field(
+            name="Username",
+            value=record.roblox_username or "לא זמין",
+            inline=True,
+        )
+        embed.add_field(
+            name="Display Name",
+            value=record.roblox_display_name or "לא זמין",
+            inline=True,
+        )
+        embed.add_field(name="Linked At", value=record.linked_at, inline=False)
+        if record.profile_url:
+            embed.add_field(name="Profile", value=record.profile_url, inline=False)
+
+        view = None
+        if record.profile_url:
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="פתח פרופיל Roblox", style=discord.ButtonStyle.link, url=record.profile_url))
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=interaction.guild is not None)
 
 
 async def setup(bot: SalesBot) -> None:

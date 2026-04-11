@@ -8,6 +8,8 @@ from sales_bot.models import OrderRequestRecord
 
 
 class OrderService:
+    ACTIVE_STATUSES = ("pending", "accepted")
+
     def __init__(self, database: Database) -> None:
         self.database = database
 
@@ -41,6 +43,13 @@ class OrderService:
         )
         return [self._map_order(row) for row in rows]
 
+    async def list_active_requests(self) -> list[OrderRequestRecord]:
+        rows = await self.database.fetchall(
+            "SELECT * FROM order_requests WHERE status IN (?, ?) ORDER BY submitted_at ASC",
+            self.ACTIVE_STATUSES,
+        )
+        return [self._map_order(row) for row in rows]
+
     async def set_owner_message(self, order_id: int, message_id: int) -> None:
         await self.database.execute(
             "UPDATE order_requests SET owner_message_id = ? WHERE id = ?",
@@ -48,12 +57,15 @@ class OrderService:
         )
 
     async def resolve_request(self, order_id: int, reviewer_id: int, status: str) -> OrderRequestRecord:
-        if status not in {"accepted", "rejected"}:
+        if status not in {"accepted", "rejected", "completed"}:
             raise PermissionDeniedError("סטטוס הזמנה לא תקין.")
 
         order = await self.get_request(order_id)
-        if order.status != "pending":
+        if order.status in {"completed", "rejected"}:
             raise PermissionDeniedError("ההזמנה הזאת כבר טופלה.")
+
+        if status == "accepted" and order.status != "pending":
+            raise PermissionDeniedError("אפשר לקבל הזמנה רק כשהיא עדיין ממתינה לטיפול.")
 
         await self.database.execute(
             """
