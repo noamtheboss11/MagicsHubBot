@@ -107,6 +107,17 @@ class Settings:
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
         )
 
+        # Set Roblox OAuth URL defaults based on PUBLIC_BASE_URL if not provided
+        if settings.public_base_url:
+            if not settings.roblox_redirect_uri:
+                settings.roblox_redirect_uri = f"{settings.public_base_url}/oauth/roblox/callback"
+            if not settings.roblox_entry_link:
+                settings.roblox_entry_link = f"{settings.public_base_url}/link"
+            if not settings.roblox_privacy_policy_url:
+                settings.roblox_privacy_policy_url = f"{settings.public_base_url}/privacy"
+            if not settings.roblox_terms_url:
+                settings.roblox_terms_url = f"{settings.public_base_url}/terms"
+
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
         return settings
