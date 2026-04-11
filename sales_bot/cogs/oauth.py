@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
-from sales_bot.exceptions import ConfigurationError, NotFoundError
+from sales_bot.exceptions import ConfigurationError
 
 
 class OAuthCog(commands.Cog):
@@ -25,26 +25,9 @@ class OAuthCog(commands.Cog):
 
         embed = discord.Embed(title="קישור חשבון Roblox", color=discord.Color.blurple())
         embed.description = "לחץ על הכפתור למטה כדי לקשר את חשבון הרובלוקס שלך. אחרי האישור, הבוט ישמור את החשבון המקושר שלך."
-        embed.add_field(name="קישור כניסה", value=self.bot.settings.roblox_entry_link or "לא מוגדר", inline=False)
-        embed.add_field(name="מדיניות פרטיות", value=self.bot.settings.roblox_privacy_policy_url or "לא מוגדר", inline=False)
-        embed.add_field(name="תנאי שימוש", value=self.bot.settings.roblox_terms_url or "לא מוגדר", inline=False)
-        embed.add_field(name="קישור חזרה", value=self.bot.settings.roblox_redirect_uri or "לא מוגדר", inline=False)
-
-        try:
-            link_record = await self.bot.services.oauth.get_link(interaction.user.id)
-        except NotFoundError:
-            pass
-        else:
-            embed.add_field(
-                name="חשבון מקושר כרגע",
-                value=link_record.roblox_username or link_record.roblox_sub,
-                inline=False,
-            )
 
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="קשר Roblox", style=discord.ButtonStyle.link, url=authorization_url))
-        view.add_item(discord.ui.Button(label="מדיניות פרטיות", style=discord.ButtonStyle.link, url=self.bot.settings.roblox_privacy_policy_url))
-        view.add_item(discord.ui.Button(label="תנאי שימוש", style=discord.ButtonStyle.link, url=self.bot.settings.roblox_terms_url))
         await interaction.response.send_message(embed=embed, view=view, ephemeral=interaction.guild is not None)
 
 
