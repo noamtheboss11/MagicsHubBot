@@ -57,16 +57,21 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @admin_only()
     async def list_orders(self, interaction: discord.Interaction) -> None:
-        if not interaction.response.is_done():
+        async def send_panel_message(message: str, *, view: discord.ui.View | None = None) -> None:
+            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
             try:
-                await interaction.response.defer(ephemeral=True)
+                await responder(message, view=view, ephemeral=True)
             except discord.HTTPException as exc:
-                if exc.code != 40060:
-                    raise
+                if exc.code == 40060:
+                    await interaction.followup.send(message, view=view, ephemeral=True)
+                    return
+                if exc.code == 10062:
+                    return
+                raise
 
         orders = await self.bot.services.orders.list_active_requests()
         if not orders:
-            await interaction.followup.send("אין כרגע הזמנות פעילות.", ephemeral=True)
+            await send_panel_message("אין כרגע הזמנות פעילות.")
             return
 
         async def on_selected(
@@ -112,8 +117,7 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
             value_getter=lambda order: str(order.id),
             on_selected=on_selected,
         )
-        await interaction.followup.send(
+        await send_panel_message(
             "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
             view=view,
-            ephemeral=True,
         )

@@ -146,6 +146,15 @@ class SalesBot(commands.Bot):
         error: app_commands.AppCommandError,
     ) -> None:
         original_error = getattr(error, "original", error)
+
+        if isinstance(original_error, discord.NotFound) and original_error.code == 10062:
+            LOGGER.warning("Skipping expired interaction error handling for command response race")
+            return
+
+        if isinstance(original_error, discord.HTTPException) and original_error.code == 40060:
+            LOGGER.warning("Skipping duplicate interaction acknowledgement error handling")
+            return
+
         LOGGER.exception("Application command error", exc_info=(type(original_error), original_error, original_error.__traceback__))
 
         if isinstance(original_error, PermissionDeniedError):
@@ -163,10 +172,10 @@ class SalesBot(commands.Bot):
         try:
             await responder(message, ephemeral=True)
         except discord.HTTPException as exc:
-            if exc.code == 40060:
+            if exc.code in {40060, 10062}:
                 try:
                     await interaction.followup.send(message, ephemeral=True)
                     return
                 except discord.HTTPException:
-                    pass
+                    return
             LOGGER.exception("Failed to send interaction error response")
