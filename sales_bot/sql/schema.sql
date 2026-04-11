@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS systems (
     image_path TEXT,
     file_path TEXT NOT NULL,
     paypal_link TEXT,
+    roblox_gamepass_id TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

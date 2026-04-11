@@ -13,10 +13,13 @@ class PaymentsCog(commands.Cog):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
 
+    async def _validate_buyer(self, user_id: int) -> None:
+        if await self.bot.services.blacklist.is_blacklisted(user_id):
+            raise PermissionDeniedError("Blacklisted users cannot purchase or receive systems.")
+
     @app_commands.command(name="buywithpaypal", description="Choose a system with a PayPal link and receive the payment link.")
     async def buywithpaypal(self, interaction: discord.Interaction) -> None:
-        if await self.bot.services.blacklist.is_blacklisted(interaction.user.id):
-            raise PermissionDeniedError("Blacklisted users cannot purchase or receive systems.")
+        await self._validate_buyer(interaction.user.id)
 
         systems = await self.bot.services.systems.list_paypal_enabled_systems()
         if not systems:
@@ -66,6 +69,57 @@ class PaymentsCog(commands.Cog):
         )
         await interaction.response.send_message(
             "Pick a system to purchase via PayPal.",
+            view=view,
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="buywithrobux", description="Choose a system with a Roblox gamepass and open its Robux purchase link.")
+    async def buywithrobux(self, interaction: discord.Interaction) -> None:
+        await self._validate_buyer(interaction.user.id)
+
+        systems = await self.bot.services.systems.list_robux_enabled_systems()
+        if not systems:
+            await interaction.response.send_message("No systems currently have Roblox gamepass links configured.", ephemeral=True)
+            return
+
+        async def on_selected(
+            select_interaction: discord.Interaction,
+            system: object,
+            parent_view: PaginatedSelectView,
+        ) -> None:
+            selected_system = system
+            if await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id):
+                raise AlreadyExistsError("You already own that system.")
+
+            gamepass_url = self.bot.services.systems.gamepass_url_for_id(selected_system.roblox_gamepass_id)
+            embed = discord.Embed(title=f"Buy {selected_system.name} with Robux", color=discord.Color.blurple())
+            embed.description = "Use the Roblox gamepass button below to complete the Robux purchase for this system."
+            embed.add_field(name="Gamepass", value=gamepass_url or "Not configured", inline=False)
+
+            link_view = discord.ui.View()
+            link_view.add_item(
+                discord.ui.Button(
+                    label="Open Gamepass",
+                    style=discord.ButtonStyle.link,
+                    url=gamepass_url,
+                )
+            )
+            await select_interaction.response.edit_message(embed=embed, view=link_view)
+
+        view = PaginatedSelectView(
+            actor_id=interaction.user.id,
+            items=systems,
+            placeholder="Select a system to buy with Robux",
+            option_builder=lambda system: discord.SelectOption(
+                label=system.name[:100],
+                description=(system.description or "Configured Roblox gamepass")[:100],
+                value=str(system.id),
+            ),
+            value_getter=lambda system: str(system.id),
+            on_selected=on_selected,
+        )
+        await interaction.response.send_message(
+            "Pick a system to purchase via Robux.",
             view=view,
             ephemeral=True,
         )

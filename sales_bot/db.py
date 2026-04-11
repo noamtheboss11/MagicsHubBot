@@ -24,7 +24,17 @@ class Database:
         self._connection.row_factory = aiosqlite.Row
         schema = self.schema_path.read_text(encoding="utf-8")
         await self._connection.executescript(schema)
+        await self._run_migrations()
         await self._connection.commit()
+
+    async def _run_migrations(self) -> None:
+        await self._ensure_column("systems", "roblox_gamepass_id", "TEXT")
+
+    async def _ensure_column(self, table_name: str, column_name: str, column_sql: str) -> None:
+        rows = await self.fetchall(f"PRAGMA table_info({table_name})")
+        if any(str(row["name"]) == column_name for row in rows):
+            return
+        await self.connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
     async def close(self) -> None:
         if self._connection is not None:

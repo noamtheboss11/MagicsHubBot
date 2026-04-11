@@ -70,6 +70,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/removeblacklist`
 - `/requestblacklistremove`
 - `/buywithpaypal`
+- `/buywithrobux`
 - `/checksystems`
 - `/revokesystem`
 - `/givesystem`
@@ -81,6 +82,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 
 - Admins are stored in SQLite, with the configured owner always treated as a permanent admin.
 - Systems store metadata plus uploaded files on disk under `data/systems/`.
+- Systems can optionally store a Roblox gamepass ID or full link for Robux purchases.
 - System deliveries go through DMs, send embeds plus attached files, and are logged so blacklist and revoke actions can delete prior bot-sent system messages.
 - Blacklist appeals use a modal and a persistent owner-DM button view that survives bot restarts.
 - PayPal purchases create a pending purchase record and are completed by a webhook simulation endpoint that triggers automatic delivery.

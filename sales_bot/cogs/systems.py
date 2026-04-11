@@ -32,6 +32,7 @@ class SystemsCog(commands.Cog):
         file="Primary file to store and deliver.",
         image="Optional preview image attachment.",
         paypal_link="Optional PayPal payment URL for this system.",
+        roblox_gamepass="Optional Roblox gamepass ID or link for Robux purchases.",
     )
     @admin_only()
     async def addsystem(
@@ -42,6 +43,7 @@ class SystemsCog(commands.Cog):
         file: discord.Attachment,
         image: discord.Attachment | None = None,
         paypal_link: str | None = None,
+        roblox_gamepass: str | None = None,
     ) -> None:
         if image and image.content_type and not image.content_type.startswith("image/"):
             await interaction.response.send_message("The optional image attachment must be an image file.", ephemeral=True)
@@ -54,6 +56,7 @@ class SystemsCog(commands.Cog):
             image_attachment=image,
             created_by=interaction.user.id,
             paypal_link=paypal_link,
+            roblox_gamepass_reference=roblox_gamepass,
         )
         await interaction.response.send_message(
             "System stored successfully.",

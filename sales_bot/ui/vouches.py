@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import discord
 
 from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
@@ -8,16 +10,16 @@ from sales_bot.ui.common import RestrictedView
 
 class VouchEditModal(discord.ui.Modal):
     def __init__(self, view: "VouchPreviewView") -> None:
-        super().__init__(title="Edit Vouch Preview")
+        super().__init__(title="עריכת הוכחה")
         self.preview_view = view
         self.reason_input = discord.ui.TextInput(
-            label="Reason",
+            label="הסבר בקצרה על החוויה שלך",
             style=discord.TextStyle.paragraph,
             max_length=500,
             default=view.reason,
         )
         self.rating_input = discord.ui.TextInput(
-            label="Rating (1-5)",
+            label="דירוג (1-5)",
             style=discord.TextStyle.short,
             max_length=1,
             default=str(view.rating),
@@ -29,10 +31,10 @@ class VouchEditModal(discord.ui.Modal):
         try:
             rating = int(str(self.rating_input))
         except ValueError as exc:
-            raise PermissionDeniedError("Rating must be a whole number between 1 and 5.") from exc
+            raise PermissionDeniedError("הדירוג צריך להיות מספר בלבד בין 1 ל 5") from exc
 
         if rating not in {1, 2, 3, 4, 5}:
-            raise PermissionDeniedError("Rating must be between 1 and 5.")
+            raise PermissionDeniedError("הדירוג צריך להיות בין 1 ל 5")
 
         self.preview_view.reason = str(self.reason_input)
         self.preview_view.rating = rating
@@ -59,25 +61,25 @@ class VouchPreviewView(RestrictedView):
 
     def build_preview_embed(self) -> discord.Embed:
         stars = "⭐" * self.rating
-        embed = discord.Embed(title="Vouch Preview", color=discord.Color.gold())
+        embed = discord.Embed(title="תצוגת הוכחה", color=discord.Color.gold())
         embed.add_field(name="Admin", value=self.admin_user.mention, inline=False)
         embed.add_field(name="Reason", value=self.reason, inline=False)
         embed.add_field(name="Rating", value=f"{stars} ({self.rating}/5)", inline=False)
-        embed.set_footer(text="Use Edit to adjust the preview before posting.")
+        embed.set_footer(text="במידה ואחד הפרטים לא נכונים אנא תקן אותם באמצעות כפתור העריכה לפני שתאשר את ההוכחה")
         return embed
 
     async def refresh_message(self) -> None:
         if self.message is not None:
             await self.message.edit(embed=self.build_preview_embed(), view=self)
 
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="אישור", style=discord.ButtonStyle.success)
     async def confirm_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
         if not await self.bot.services.admins.is_admin(self.admin_user.id):
-            raise PermissionDeniedError("The selected user is no longer on the admin list.")
+            raise PermissionDeniedError("המשתמש שבחרת כבר לא במערכת יותר, אנא בחר משתמש אחר")
 
         channel = self.bot.get_channel(self.bot.settings.vouch_channel_id)
         if channel is None:
@@ -86,11 +88,11 @@ class VouchPreviewView(RestrictedView):
         if not isinstance(channel, discord.abc.Messageable):
             raise ExternalServiceError("Configured vouch channel is not messageable.")
 
-        publish_embed = discord.Embed(title="New Vouch", color=discord.Color.gold())
+        publish_embed = discord.Embed(title="הוכחה חדשה", color=discord.Color.gold())
         publish_embed.add_field(name="Admin", value=self.admin_user.mention, inline=False)
         publish_embed.add_field(name="Reason", value=self.reason, inline=False)
         publish_embed.add_field(name="Rating", value=f"{'⭐' * self.rating} ({self.rating}/5)", inline=False)
-        publish_embed.set_footer(text=f"Submitted by {interaction.user}")
+        publish_embed.set_footer(text=f"הוכחה מאת: {interaction.user}")
 
         posted_message = await channel.send(embed=publish_embed)
         await self.bot.services.vouches.create_vouch(
@@ -103,13 +105,13 @@ class VouchPreviewView(RestrictedView):
 
         self.disable_all_items()
         await interaction.response.edit_message(
-            content=f"Vouch posted to <#{self.bot.settings.vouch_channel_id}>.",
+            content=f"הוכחה פורסמה ב <#{self.bot.settings.vouch_channel_id}>.",
             embed=self.build_preview_embed(),
             view=self,
         )
         self.stop()
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="עריכה", style=discord.ButtonStyle.primary)
     async def edit_button(
         self,
         interaction: discord.Interaction,
@@ -117,12 +119,12 @@ class VouchPreviewView(RestrictedView):
     ) -> None:
         await interaction.response.send_modal(VouchEditModal(self))
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="ביטול", style=discord.ButtonStyle.secondary)
     async def cancel_button(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button[Any],
     ) -> None:
         self.disable_all_items()
-        await interaction.response.edit_message(content="Vouch cancelled.", embed=self.build_preview_embed(), view=self)
+        await interaction.response.edit_message(content="יצירת ההוכחה בוטלה.", embed=self.build_preview_embed(), view=self)
         self.stop()

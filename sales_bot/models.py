@@ -11,6 +11,7 @@ class SystemRecord:
     file_path: str
     image_path: str | None
     paypal_link: str | None
+    roblox_gamepass_id: str | None
     created_by: int | None
     created_at: str
 
