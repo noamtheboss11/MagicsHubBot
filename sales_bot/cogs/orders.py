@@ -16,12 +16,19 @@ class OrdersCog(commands.Cog):
     @app_commands.command(name="sendorderpanel", description="שליחת פאנל ההזמנות לערוץ ההזמנות.")
     @admin_only()
     async def sendorderpanel(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
         channel = self.bot.get_channel(self.bot.settings.order_channel_id)
         if channel is None:
             channel = await self.bot.fetch_channel(self.bot.settings.order_channel_id)
 
         if not isinstance(channel, discord.abc.Messageable):
-            await interaction.response.send_message("ערוץ ההזמנות לא תומך בשליחת הודעות.", ephemeral=True)
+            await interaction.followup.send("ערוץ ההזמנות לא תומך בשליחת הודעות.", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -31,7 +38,7 @@ class OrdersCog(commands.Cog):
         )
         view = OrderPanelView(self.bot)
         await channel.send(embed=embed, view=view)
-        await interaction.response.send_message(f"פאנל ההזמנות נשלח ל-<#{self.bot.settings.order_channel_id}>.", ephemeral=True)
+        await interaction.followup.send(f"פאנל ההזמנות נשלח ל-<#{self.bot.settings.order_channel_id}>.", ephemeral=True)
 
 
 async def setup(bot: SalesBot) -> None:
