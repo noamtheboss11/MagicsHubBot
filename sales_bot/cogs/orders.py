@@ -69,6 +69,24 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
                     return
                 raise
 
+        async def send_panel_once(message: str, panel_view: discord.ui.View) -> bool:
+            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+            try:
+                await responder(message, view=panel_view, ephemeral=False)
+                return True
+            except discord.HTTPException as exc:
+                if exc.code == 40060:
+                    try:
+                        await interaction.followup.send(message, view=panel_view, ephemeral=False)
+                        return True
+                    except discord.HTTPException as followup_exc:
+                        if followup_exc.code == 10062:
+                            return False
+                        raise
+                if exc.code == 10062:
+                    return False
+                raise
+
         orders = await self.bot.services.orders.list_active_requests()
         if not orders:
             await send_acknowledgement("אין כרגע הזמנות פעילות.")
@@ -117,6 +135,15 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
             value_getter=lambda order: str(order.id),
             on_selected=on_selected,
         )
+
+        if interaction.guild is None:
+            sent = await send_panel_once(
+                "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
+                view,
+            )
+            if sent:
+                return
+
         try:
             owner_dm = interaction.user.dm_channel or await interaction.user.create_dm()
             await owner_dm.send(
