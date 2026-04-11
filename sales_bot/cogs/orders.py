@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -51,21 +53,29 @@ async def setup(bot: SalesBot) -> None:
 class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="ניהול הזמנות"):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
+        self._recent_list_interactions: dict[int, float] = {}
         super().__init__()
 
     @app_commands.command(name="list", description="פתיחת רשימת ההזמנות הפעילות בתפריט בחירה.")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @admin_only()
     async def list_orders(self, interaction: discord.Interaction) -> None:
+        now = time.monotonic()
+        self._recent_list_interactions = {
+            interaction_id: timestamp
+            for interaction_id, timestamp in self._recent_list_interactions.items()
+            if now - timestamp < 30
+        }
+        if interaction.id in self._recent_list_interactions:
+            return
+        self._recent_list_interactions[interaction.id] = now
+
         async def send_acknowledgement(message: str) -> None:
             responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
             try:
                 await responder(message, ephemeral=True)
             except discord.HTTPException as exc:
-                if exc.code == 40060:
-                    await interaction.followup.send(message, ephemeral=True)
-                    return
-                if exc.code == 10062:
+                if exc.code in {40060, 10062}:
                     return
                 raise
 
@@ -75,15 +85,7 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
                 await responder(message, view=panel_view, ephemeral=False)
                 return True
             except discord.HTTPException as exc:
-                if exc.code == 40060:
-                    try:
-                        await interaction.followup.send(message, view=panel_view, ephemeral=False)
-                        return True
-                    except discord.HTTPException as followup_exc:
-                        if followup_exc.code == 10062:
-                            return False
-                        raise
-                if exc.code == 10062:
+                if exc.code in {40060, 10062}:
                     return False
                 raise
 
