@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
+from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.models import OrderRequestRecord
 from sales_bot.ui.common import RestrictedView
 
@@ -103,6 +103,15 @@ class OrderModal(discord.ui.Modal):
         self.add_item(self.offered_price_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            await self.bot.services.oauth.get_link(interaction.user.id)
+        except NotFoundError:
+            await interaction.response.send_message(
+                "כדי לפתוח הזמנה אישית צריך קודם לקשר את חשבון הרובלוקס שלך עם `/link`.",
+                ephemeral=True,
+            )
+            return
+
         draft = OrderDraft(
             requested_item=str(self.requested_item_input),
             required_timeframe=str(self.required_timeframe_input),
@@ -132,15 +141,14 @@ class OrderPanelView(discord.ui.View):
         button: discord.ui.Button[Any],
     ) -> None:
         try:
-            await self.bot.services.oauth.get_link(interaction.user.id)
-        except Exception:
-            await interaction.response.send_message(
-                "כדי לפתוח הזמנה אישית צריך קודם לקשר את חשבון הרובלוקס שלך עם `/link`.",
+            await interaction.response.send_modal(OrderModal(self.bot))
+        except discord.HTTPException as exc:
+            if exc.code != 40060:
+                raise
+            await interaction.followup.send(
+                "הבקשה נפתחה כבר. נסה ללחוץ שוב על הכפתור אם חלון ההזמנה לא הופיע.",
                 ephemeral=True,
             )
-            return
-
-        await interaction.response.send_modal(OrderModal(self.bot))
 
 
 class OrderPreviewView(RestrictedView):

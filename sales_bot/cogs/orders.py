@@ -54,11 +54,19 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
         super().__init__()
 
     @app_commands.command(name="list", description="פתיחת רשימת ההזמנות הפעילות בתפריט בחירה.")
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
     @admin_only()
     async def list_orders(self, interaction: discord.Interaction) -> None:
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
         orders = await self.bot.services.orders.list_active_requests()
         if not orders:
-            await interaction.response.send_message("אין כרגע הזמנות פעילות.", ephemeral=True)
+            await interaction.followup.send("אין כרגע הזמנות פעילות.", ephemeral=True)
             return
 
         async def on_selected(
@@ -104,7 +112,7 @@ class OrderAdminCog(commands.GroupCog, group_name="orders", group_description="�
             value_getter=lambda order: str(order.id),
             on_selected=on_selected,
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "בחר הזמנה מהרשימה כדי לפתוח אותה ב-DM שלך.",
             view=view,
             ephemeral=True,
