@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +13,9 @@ from sales_bot.config import Settings
 from sales_bot.db import Database
 from sales_bot.exceptions import ConfigurationError, ExternalServiceError, NotFoundError
 from sales_bot.models import RobloxLinkRecord
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class RobloxOAuthService:
@@ -41,6 +45,7 @@ class RobloxOAuthService:
             "INSERT INTO oauth_states (state, user_id, expires_at) VALUES (?, ?, ?)",
             (state, user_id, expires_at.isoformat()),
         )
+        LOGGER.info("Created Roblox OAuth state for Discord user %s", user_id)
         return state
 
     def build_authorization_url(self, state: str) -> str:
@@ -61,14 +66,17 @@ class RobloxOAuthService:
             (state,),
         )
         if row is None:
+            LOGGER.warning("Roblox OAuth state lookup missed for state prefix %s", state[:8])
             raise NotFoundError("OAuth state is invalid or expired. Run /link again and try the new button.")
 
         expires_at = datetime.fromisoformat(str(row["expires_at"]))
         if expires_at < datetime.now(UTC):
             await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+            LOGGER.warning("Roblox OAuth state expired for Discord user %s", int(row["user_id"]))
             raise NotFoundError("OAuth state is invalid or expired. Run /link again and try the new button.")
 
         await self.database.execute("DELETE FROM oauth_states WHERE state = ?", (state,))
+        LOGGER.info("Consumed Roblox OAuth state for Discord user %s", int(row["user_id"]))
 
         return int(row["user_id"])
 

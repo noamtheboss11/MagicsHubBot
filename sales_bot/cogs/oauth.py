@@ -20,6 +20,14 @@ class OAuthCog(commands.Cog):
                 "מערכת קישור הרובלוקס עדיין לא מוגדרת. יש להגדיר קודם את משתני הסביבה של Roblox OAuth."
             )
 
+        ephemeral = interaction.guild is not None
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=ephemeral)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
         state = await self.bot.services.oauth.create_state(interaction.user.id)
         authorization_url = self.bot.services.oauth.build_authorization_url(state)
 
@@ -28,14 +36,7 @@ class OAuthCog(commands.Cog):
 
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="קשר חשבון", style=discord.ButtonStyle.link, url=authorization_url))
-        ephemeral = interaction.guild is not None
-        try:
-            responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
-            await responder(embed=embed, view=view, ephemeral=ephemeral)
-        except discord.HTTPException as exc:
-            if exc.code != 40060:
-                raise
-            await interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=ephemeral)
 
 
 async def setup(bot: SalesBot) -> None:
