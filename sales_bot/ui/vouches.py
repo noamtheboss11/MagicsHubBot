@@ -62,9 +62,9 @@ class VouchPreviewView(RestrictedView):
     def build_preview_embed(self) -> discord.Embed:
         stars = "⭐" * self.rating
         embed = discord.Embed(title="תצוגת הוכחה", color=discord.Color.gold())
-        embed.add_field(name="Admin", value=self.admin_user.mention, inline=False)
-        embed.add_field(name="Reason", value=self.reason, inline=False)
-        embed.add_field(name="Rating", value=f"{stars} ({self.rating}/5)", inline=False)
+        embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=False)
+        embed.add_field(name="הסבר מה קיבלת, מה קנית, ואת החוויה שלך", value=self.reason, inline=False)
+        embed.add_field(name="דירוג", value=f"{stars} ({self.rating}/5)", inline=False)
         embed.set_footer(text="במידה ואחד הפרטים לא נכונים אנא תקן אותם באמצעות כפתור העריכה לפני שתאשר את ההוכחה")
         return embed
 
@@ -89,9 +89,9 @@ class VouchPreviewView(RestrictedView):
             raise ExternalServiceError("Configured vouch channel is not messageable.")
 
         publish_embed = discord.Embed(title="הוכחה חדשה", color=discord.Color.gold())
-        publish_embed.add_field(name="Admin", value=self.admin_user.mention, inline=False)
-        publish_embed.add_field(name="Reason", value=self.reason, inline=False)
-        publish_embed.add_field(name="Rating", value=f"{'⭐' * self.rating} ({self.rating}/5)", inline=False)
+        publish_embed.add_field(name="הוכחה על", value=self.admin_user.mention, inline=False)
+        publish_embed.add_field(name="הסבר מה קיבלת, מה קנית, ואת החוויה שלך", value=self.reason, inline=False)
+        publish_embed.add_field(name="דירוג", value=f"{'⭐' * self.rating} ({self.rating}/5)", inline=False)
         publish_embed.set_footer(text=f"הוכחה מאת: {interaction.user}")
 
         posted_message = await channel.send(embed=publish_embed)
