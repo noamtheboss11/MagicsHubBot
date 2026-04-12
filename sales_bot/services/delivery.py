@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import discord
 
-from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
+from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.models import SystemRecord
 
 if TYPE_CHECKING:
@@ -26,15 +26,23 @@ class DeliveryService:
         if await bot.services.blacklist.is_blacklisted(user.id):
             raise PermissionDeniedError("המשתמש הזה נמצא בבלאקליסט ולכן אי אפשר לשלוח לו מערכות.")
 
+        system_file_path = Path(system.file_path)
+        if not system_file_path.is_file():
+            raise NotFoundError(
+                "קובץ המערכת לא נמצא על השרת. אם זה קרה אחרי דיפלוי, צריך להשתמש באחסון קבוע או להעלות מחדש את המערכת."
+            )
+
         try:
             dm_channel = user.dm_channel or await user.create_dm()
-            system_file = discord.File(Path(system.file_path), filename=Path(system.file_path).name)
+            system_file = discord.File(system_file_path, filename=system_file_path.name)
             message = await dm_channel.send(
                 content=f"הנה המערכת שרצית להוריד {system.name}",
                 file=system_file,
             )
         except discord.Forbidden as exc:
             raise ExternalServiceError("לא הצלחתי לשלוח למשתמש הודעה פרטית. בקש ממנו לפתוח DM ונסה שוב.") from exc
+        except discord.HTTPException as exc:
+            raise ExternalServiceError("אירעה שגיאה בזמן שליחת המערכת ב-DM. נסה שוב בעוד רגע.") from exc
 
         if record_ownership:
             await bot.services.ownership.grant_system(user.id, system.id, granted_by, source)
