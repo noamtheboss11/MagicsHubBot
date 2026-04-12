@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 
 import discord
 
 from sales_bot.exceptions import ExternalServiceError, PermissionDeniedError
 from sales_bot.models import SystemRecord
-from sales_bot.storage import system_message_files
 
 if TYPE_CHECKING:
     from sales_bot.bot import SalesBot
@@ -24,18 +24,17 @@ class DeliveryService:
         record_ownership: bool = True,
     ) -> discord.Message:
         if await bot.services.blacklist.is_blacklisted(user.id):
-            raise PermissionDeniedError("That user is blacklisted and cannot receive systems.")
+            raise PermissionDeniedError("המשתמש הזה נמצא בבלאקליסט ולכן אי אפשר לשלוח לו מערכות.")
 
         try:
             dm_channel = user.dm_channel or await user.create_dm()
-            embed = bot.services.systems.build_embed(system)
-            files, image_name = system_message_files(system.file_path, system.image_path)
-            if image_name:
-                embed.set_image(url=f"attachment://{image_name}")
-
-            message = await dm_channel.send(embed=embed, files=files)
+            system_file = discord.File(Path(system.file_path), filename=Path(system.file_path).name)
+            message = await dm_channel.send(
+                content=f"הנה המערכת שרצית להוריד {system.name}",
+                file=system_file,
+            )
         except discord.Forbidden as exc:
-            raise ExternalServiceError("Unable to DM that user. Ask them to enable DMs and try again.") from exc
+            raise ExternalServiceError("לא הצלחתי לשלוח למשתמש הודעה פרטית. בקש ממנו לפתוח DM ונסה שוב.") from exc
 
         if record_ownership:
             await bot.services.ownership.grant_system(user.id, system.id, granted_by, source)
