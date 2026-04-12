@@ -1,31 +1,25 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import aiosqlite
 import asyncpg
 import discord
 
 from sales_bot.db import Database
-from sales_bot.exceptions import AlreadyExistsError, ExternalServiceError, NotFoundError
-from sales_bot.models import SystemRecord
-from sales_bot.services.system_storage import SupabaseStorageService
-from sales_bot.storage import archive_path, remove_path, save_attachment, slugify
+from sales_bot.exceptions import AlreadyExistsError, NotFoundError
+from sales_bot.models import SystemRecord, system_select_list
+from sales_bot.storage import remove_path, save_bytes, slugify
 
 
 class SystemService:
-    def __init__(self, database: Database, storage_root: Path, system_storage: SupabaseStorageService) -> None:
+    SELECT_COLUMNS = system_select_list()
+
+    def __init__(self, database: Database, storage_root: Path) -> None:
         self.database = database
         self.storage_root = storage_root
-        self.system_storage = system_storage
-        self.data_root = self.storage_root.parent
-        self.archive_root = self.storage_root.parent / "archive" / "systems"
-        if not self.system_storage.is_configured:
-            self.storage_root.mkdir(parents=True, exist_ok=True)
-            self.archive_root.mkdir(parents=True, exist_ok=True)
+        self.storage_root.mkdir(parents=True, exist_ok=True)
 
     async def create_system(
         self,
@@ -39,64 +33,72 @@ class SystemService:
         roblox_gamepass_reference: str | None,
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{file_attachment.id}"
-        storage_prefix = f"systems/{slugify(name)}-{file_attachment.id}"
-        if self.system_storage.is_configured:
+        file_data = await file_attachment.read()
+        image_data = await image_attachment.read() if image_attachment else None
+
+        file_path = folder / Path(file_attachment.filename).name
+        try:
+            file_path = save_bytes(folder, file_attachment.filename, file_data)
+        except OSError:
+            pass
+
+        image_path = folder / Path(image_attachment.filename).name if image_attachment else None
+        if image_attachment and image_data is not None:
             try:
-                file_path = await self.system_storage.upload_attachment(
-                    file_attachment,
-                    f"{storage_prefix}/{uuid4().hex}_{file_attachment.filename}",
-                )
-                image_path = (
-                    await self.system_storage.upload_attachment(
-                        image_attachment,
-                        f"{storage_prefix}/{uuid4().hex}_{image_attachment.filename}",
-                    )
-                    if image_attachment
-                    else None
-                )
-            except OSError as exc:
-                raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת ב-Supabase Storage.") from exc
-        else:
-            try:
-                file_path = await save_attachment(file_attachment, folder)
-                image_path = await save_attachment(image_attachment, folder) if image_attachment else None
-            except OSError as exc:
-                raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת באחסון הקבוע.") from exc
+                image_path = save_bytes(folder, image_attachment.filename, image_data)
+            except OSError:
+                pass
+
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
 
         try:
             system_id = await self.database.insert(
                 """
-                INSERT INTO systems (name, description, image_path, file_path, paypal_link, roblox_gamepass_id, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO systems (
+                    name,
+                    description,
+                    image_path,
+                    file_path,
+                    file_name,
+                    file_data,
+                    image_name,
+                    image_data,
+                    paypal_link,
+                    roblox_gamepass_id,
+                    created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name.strip(),
                     description.strip(),
-                    self.to_stored_asset_path(image_path) if image_path else None,
-                    self.to_stored_asset_path(file_path),
+                    str(image_path) if image_path else None,
+                    str(file_path),
+                    file_attachment.filename,
+                    file_data,
+                    image_attachment.filename if image_attachment else None,
+                    image_data,
                     paypal_link.strip() if paypal_link else None,
                     roblox_gamepass_id,
                     created_by,
                 ),
             )
-        except (aiosqlite.IntegrityError, asyncpg.UniqueViolationError) as exc:
-            if not self.system_storage.is_configured:
-                remove_path(file_path)
-                remove_path(image_path)
-            raise AlreadyExistsError("כבר קיימת מערכת עם השם הזה.") from exc
+        except (aiosqlite.IntegrityError, asyncpg.exceptions.UniqueViolationError) as exc:
+            remove_path(file_path)
+            remove_path(image_path)
+            raise AlreadyExistsError("A system with that name already exists.") from exc
 
         return await self.get_system(system_id)
 
     async def get_system(self, system_id: int) -> SystemRecord:
-        row = await self.database.fetchone("SELECT * FROM systems WHERE id = ?", (system_id,))
+        row = await self.database.fetchone(f"SELECT {self.SELECT_COLUMNS} FROM systems WHERE id = ?", (system_id,))
         if row is None:
             raise NotFoundError("System not found.")
         return self._map_system(row)
 
     async def get_system_by_name(self, name: str) -> SystemRecord:
         row = await self.database.fetchone(
-            "SELECT * FROM systems WHERE LOWER(name) = LOWER(?)",
+            f"SELECT {self.SELECT_COLUMNS} FROM systems WHERE LOWER(name) = LOWER(?)",
             (name.strip(),),
         )
         if row is None:
@@ -104,18 +106,18 @@ class SystemService:
         return self._map_system(row)
 
     async def list_systems(self) -> list[SystemRecord]:
-        rows = await self.database.fetchall("SELECT * FROM systems ORDER BY LOWER(name) ASC")
+        rows = await self.database.fetchall(f"SELECT {self.SELECT_COLUMNS} FROM systems ORDER BY LOWER(name) ASC")
         return [self._map_system(row) for row in rows]
 
     async def list_paypal_enabled_systems(self) -> list[SystemRecord]:
         rows = await self.database.fetchall(
-            "SELECT * FROM systems WHERE paypal_link IS NOT NULL AND paypal_link != '' ORDER BY LOWER(name) ASC"
+            f"SELECT {self.SELECT_COLUMNS} FROM systems WHERE paypal_link IS NOT NULL AND paypal_link != '' ORDER BY LOWER(name) ASC"
         )
         return [self._map_system(row) for row in rows]
 
     async def list_robux_enabled_systems(self) -> list[SystemRecord]:
         rows = await self.database.fetchall(
-            "SELECT * FROM systems WHERE roblox_gamepass_id IS NOT NULL AND roblox_gamepass_id != '' ORDER BY LOWER(name) ASC"
+            f"SELECT {self.SELECT_COLUMNS} FROM systems WHERE roblox_gamepass_id IS NOT NULL AND roblox_gamepass_id != '' ORDER BY LOWER(name) ASC"
         )
         return [self._map_system(row) for row in rows]
 
@@ -127,7 +129,7 @@ class SystemService:
         robux_only: bool = False,
     ) -> list[SystemRecord]:
         like_value = f"%{current.strip()}%"
-        query = "SELECT * FROM systems WHERE LOWER(name) LIKE LOWER(?)"
+        query = f"SELECT {self.SELECT_COLUMNS} FROM systems WHERE LOWER(name) LIKE LOWER(?)"
         if paypal_only:
             query += " AND paypal_link IS NOT NULL AND paypal_link != ''"
         if robux_only:
@@ -136,10 +138,79 @@ class SystemService:
         rows = await self.database.fetchall(query, (like_value,))
         return [self._map_system(row) for row in rows]
 
+    async def get_stored_file(self, system_id: int) -> tuple[str, bytes]:
+        row = await self.database.fetchone(
+            "SELECT id, file_path, file_name, file_data FROM systems WHERE id = ?",
+            (system_id,),
+        )
+        if row is None:
+            raise NotFoundError("System not found.")
+
+        file_path = Path(str(row["file_path"]))
+        file_name = str(row["file_name"]) if row["file_name"] else file_path.name
+        file_data = row["file_data"]
+        if file_data is not None:
+            return file_name, bytes(file_data)
+
+        if file_path.is_file():
+            data = file_path.read_bytes()
+            await self.database.execute(
+                "UPDATE systems SET file_name = COALESCE(file_name, ?), file_data = ? WHERE id = ?",
+                (file_name, data, system_id),
+            )
+            return file_name, data
+
+        raise NotFoundError(
+            "קובץ המערכת לא נמצא בנתונים השמורים. יש להעלות מחדש את המערכת כדי למנוע אובדן נתונים."
+        )
+
+    async def backfill_binary_assets(self) -> int:
+        rows = await self.database.fetchall(
+            "SELECT id, file_path, file_name, file_data, image_path, image_name, image_data FROM systems"
+        )
+        backfilled = 0
+        for row in rows:
+            file_name = str(row["file_name"]) if row["file_name"] else None
+            file_data = bytes(row["file_data"]) if row["file_data"] is not None else None
+            image_name = str(row["image_name"]) if row["image_name"] else None
+            image_data = bytes(row["image_data"]) if row["image_data"] is not None else None
+            changed = False
+
+            file_path = Path(str(row["file_path"])) if row["file_path"] else None
+            if file_data is None and file_path is not None and file_path.is_file():
+                file_data = file_path.read_bytes()
+                file_name = file_name or file_path.name
+                changed = True
+
+            image_path = Path(str(row["image_path"])) if row["image_path"] else None
+            if image_data is None and image_path is not None and image_path.is_file():
+                image_data = image_path.read_bytes()
+                image_name = image_name or image_path.name
+                changed = True
+
+            if not changed:
+                continue
+
+            await self.database.execute(
+                """
+                UPDATE systems
+                SET file_name = COALESCE(file_name, ?),
+                    file_data = COALESCE(file_data, ?),
+                    image_name = COALESCE(image_name, ?),
+                    image_data = COALESCE(image_data, ?)
+                WHERE id = ?
+                """,
+                (file_name, file_data, image_name, image_data, int(row["id"])),
+            )
+            backfilled += 1
+
+        return backfilled
+
     async def delete_system(self, system_id: int) -> SystemRecord:
         system = await self.get_system(system_id)
         await self.database.execute("DELETE FROM systems WHERE id = ?", (system_id,))
-        self._archive_system_assets(system)
+        remove_path(system.file_path)
+        remove_path(system.image_path)
         return system
 
     def build_embed(self, system: SystemRecord) -> discord.Embed:
@@ -183,85 +254,24 @@ class SystemService:
             return None
         return f"https://www.roblox.com/game-pass/{gamepass_id}"
 
-    def to_stored_asset_path(self, path: str | Path | None) -> str | None:
-        if path is None:
-            return None
-
-        if isinstance(path, str) and self.system_storage.is_supabase_path(path):
-            return path
-
-        asset_path = Path(path)
-        try:
-            return str(asset_path.relative_to(self.data_root))
-        except ValueError:
-            return str(asset_path)
-
-    def resolve_asset_path(self, raw_path: str | Path | None) -> Path | None:
-        if raw_path is None:
-            return None
-
-        if isinstance(raw_path, str) and self.system_storage.is_supabase_path(raw_path):
-            return None
-
-        asset_path = Path(raw_path)
-        if asset_path.exists():
-            return asset_path
-
-        if not asset_path.is_absolute():
-            candidate = self.data_root / asset_path
-            if candidate.exists():
-                return candidate
-            return candidate
-
-        parts = list(asset_path.parts)
-        if "systems" in parts:
-            systems_index = parts.index("systems")
-            candidate = self.data_root.joinpath(*parts[systems_index:])
-            if candidate.exists():
-                return candidate
-            return candidate
-
-        if "archive" in parts:
-            archive_index = parts.index("archive")
-            candidate = self.data_root.joinpath(*parts[archive_index:])
-            if candidate.exists():
-                return candidate
-            return candidate
-
-        return asset_path
-
-    def _archive_system_assets(self, system: SystemRecord) -> None:
-        if self.system_storage.is_supabase_path(system.file_path):
-            return
-
-        file_path = self.resolve_asset_path(system.file_path) or Path(system.file_path)
-        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-        archive_prefix = f"{slugify(system.name)}-{system.id}-{timestamp}"
-
-        if file_path.exists():
-            folder = file_path.parent
-            if folder.exists() and folder.is_dir() and folder != self.storage_root:
-                archive_path(folder, self.archive_root, archive_prefix)
-                return
-
-        resolved_image_path = self.resolve_asset_path(system.image_path) if system.image_path else None
-        archive_path(file_path, self.archive_root, f"{archive_prefix}-file{file_path.suffix}")
-        archive_path(
-            resolved_image_path,
-            self.archive_root,
-            f"{archive_prefix}-image{resolved_image_path.suffix}" if resolved_image_path else None,
-        )
-
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
+        file_path = str(row["file_path"])
+        image_path = str(row["image_path"]) if row["image_path"] else None
         return SystemRecord(
             id=int(row["id"]),
             name=str(row["name"]),
             description=str(row["description"]),
-            file_path=str(row["file_path"]),
-            image_path=str(row["image_path"]) if row["image_path"] else None,
+            file_path=file_path,
+            image_path=image_path,
             paypal_link=str(row["paypal_link"]) if row["paypal_link"] else None,
             roblox_gamepass_id=str(row["roblox_gamepass_id"]) if row["roblox_gamepass_id"] else None,
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
+            file_name=str(row["file_name"]) if row["file_name"] else file_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1],
+            image_name=(
+                str(row["image_name"])
+                if row["image_name"]
+                else (image_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] if image_path else None)
+            ),
         )

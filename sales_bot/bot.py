@@ -21,7 +21,6 @@ from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.payments import PaymentService
-from sales_bot.services.system_storage import SupabaseStorageService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 from sales_bot.ui.appeals import AppealDecisionView
@@ -65,12 +64,10 @@ class SalesBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.database.connect()
         self.http_session = aiohttp.ClientSession()
-        system_storage = SupabaseStorageService(self.http_session, self.settings)
         self.services = ServiceContainer(
             admins=AdminService(self.database, self.settings.owner_user_id),
             blacklist=BlacklistService(self.database),
-            system_storage=system_storage,
-            systems=SystemService(self.database, self.settings.data_dir / "systems", system_storage),
+            systems=SystemService(self.database, self.settings.data_dir / "systems"),
             ownership=OwnershipService(self.database),
             orders=OrderService(self.database),
             delivery=DeliveryService(),
@@ -78,6 +75,10 @@ class SalesBot(commands.Bot):
             vouches=VouchService(self.database),
             oauth=RobloxOAuthService(self.database, self.settings),
         )
+
+        backfilled_assets = await self.services.systems.backfill_binary_assets()
+        if backfilled_assets:
+            LOGGER.info("Backfilled persistent file data for %s systems", backfilled_assets)
 
 
         for extension in self.EXTENSIONS:
