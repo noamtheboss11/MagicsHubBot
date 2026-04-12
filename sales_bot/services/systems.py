@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
+import asyncpg
 import discord
 
 from sales_bot.db import Database
-from sales_bot.exceptions import AlreadyExistsError, NotFoundError
+from sales_bot.exceptions import AlreadyExistsError, ExternalServiceError, NotFoundError
 from sales_bot.models import SystemRecord
-from sales_bot.storage import remove_path, save_attachment, slugify
+from sales_bot.storage import archive_path, remove_path, save_attachment, slugify
 
 
 class SystemService:
     def __init__(self, database: Database, storage_root: Path) -> None:
         self.database = database
         self.storage_root = storage_root
+        self.archive_root = self.storage_root.parent / "archive" / "systems"
         self.storage_root.mkdir(parents=True, exist_ok=True)
+        self.archive_root.mkdir(parents=True, exist_ok=True)
 
     async def create_system(
         self,
@@ -30,8 +34,11 @@ class SystemService:
         roblox_gamepass_reference: str | None,
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{file_attachment.id}"
-        file_path = await save_attachment(file_attachment, folder)
-        image_path = await save_attachment(image_attachment, folder) if image_attachment else None
+        try:
+            file_path = await save_attachment(file_attachment, folder)
+            image_path = await save_attachment(image_attachment, folder) if image_attachment else None
+        except OSError as exc:
+            raise ExternalServiceError("לא הצלחתי לשמור את קבצי המערכת באחסון הקבוע.") from exc
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
 
         try:
@@ -50,10 +57,10 @@ class SystemService:
                     created_by,
                 ),
             )
-        except aiosqlite.IntegrityError as exc:
+        except (aiosqlite.IntegrityError, asyncpg.UniqueViolationError) as exc:
             remove_path(file_path)
             remove_path(image_path)
-            raise AlreadyExistsError("A system with that name already exists.") from exc
+            raise AlreadyExistsError("כבר קיימת מערכת עם השם הזה.") from exc
 
         return await self.get_system(system_id)
 
@@ -108,8 +115,7 @@ class SystemService:
     async def delete_system(self, system_id: int) -> SystemRecord:
         system = await self.get_system(system_id)
         await self.database.execute("DELETE FROM systems WHERE id = ?", (system_id,))
-        remove_path(system.file_path)
-        remove_path(system.image_path)
+        self._archive_system_assets(system)
         return system
 
     def build_embed(self, system: SystemRecord) -> discord.Embed:
@@ -152,6 +158,20 @@ class SystemService:
         if not gamepass_id:
             return None
         return f"https://www.roblox.com/game-pass/{gamepass_id}"
+
+    def _archive_system_assets(self, system: SystemRecord) -> None:
+        file_path = Path(system.file_path)
+        timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+        archive_prefix = f"{slugify(system.name)}-{system.id}-{timestamp}"
+
+        if file_path.exists():
+            folder = file_path.parent
+            if folder.exists() and folder.is_dir() and folder != self.storage_root:
+                archive_path(folder, self.archive_root, archive_prefix)
+                return
+
+        archive_path(system.file_path, self.archive_root, f"{archive_prefix}-file{Path(system.file_path).suffix}")
+        archive_path(system.image_path, self.archive_root, f"{archive_prefix}-image{Path(system.image_path).suffix}" if system.image_path else None)
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:

@@ -148,6 +148,7 @@ Optional values:
 - `WEB_PORT`
 - `PORT`
 - `SQLITE_PATH`
+- `DATA_DIR`
 - `LOG_LEVEL`
 - `SYNC_COMMANDS_ON_STARTUP`
 - `DEV_GUILD_ID`
@@ -156,12 +157,16 @@ Optional values:
 
 If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
 
+If `DATABASE_URL` is configured, `DATA_DIR` must also be configured to a persistent folder. This is where uploaded system files and archives are stored.
+
 ## Render
 
 Render Web Service settings:
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `python main.py`
+
+For production, mount a persistent disk in Render and set `DATA_DIR` to that mounted path. Without a persistent `DATA_DIR`, uploaded system files can be lost on redeploy.
 
 The app now falls back to Render's `PORT` environment variable automatically, so `WEB_PORT=$PORT` is no longer required in the start command.
 

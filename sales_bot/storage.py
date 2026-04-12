@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,6 +30,23 @@ def remove_path(path: str | Path | None) -> None:
         parent = target.parent
         if parent.exists() and not any(parent.iterdir()):
             parent.rmdir()
+
+
+def archive_path(path: str | Path | None, archive_root: Path, archive_name: str | None = None) -> Path | None:
+    if not path:
+        return None
+
+    source = Path(path)
+    if not source.exists():
+        return None
+
+    archive_root.mkdir(parents=True, exist_ok=True)
+    target_name = archive_name or source.name
+    target = archive_root / target_name
+    if target.exists():
+        target = archive_root / f"{uuid4().hex}_{target_name}"
+
+    return Path(shutil.move(str(source), str(target)))
 
 
 def system_message_files(file_path: str, image_path: str | None) -> tuple[list[discord.File], str | None]:

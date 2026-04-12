@@ -40,14 +40,14 @@ class SystemsCog(commands.Cog):
         embed.set_footer(text=f"סה\"כ מערכות: {len(systems)}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="addsystem", description="Create a new system entry and upload its deliverable files.")
+    @app_commands.command(name="addsystem", description="יצירת מערכת חדשה והעלאת הקבצים שלה לאחסון הקבוע.")
     @app_commands.describe(
-        name="Display name for the system.",
-        description="Description shown when the system is delivered.",
-        file="Primary file to store and deliver.",
-        image="Optional preview image attachment.",
-        paypal_link="Optional PayPal payment URL for this system.",
-        roblox_gamepass="Optional Roblox gamepass ID or link for Robux purchases.",
+        name="שם המערכת.",
+        description="תיאור שיוצג כאשר המערכת תישלח.",
+        file="הקובץ הראשי שישמר ויישלח למשתמשים.",
+        image="תמונת תצוגה מקדימה אופציונלית.",
+        paypal_link="קישור PayPal אופציונלי עבור המערכת.",
+        roblox_gamepass="איידי או קישור גיימפאס אופציונלי לרכישת Robux.",
     )
     @admin_only()
     async def addsystem(
@@ -61,7 +61,7 @@ class SystemsCog(commands.Cog):
         roblox_gamepass: str | None = None,
     ) -> None:
         if image and image.content_type and not image.content_type.startswith("image/"):
-            await interaction.response.send_message("The optional image attachment must be an image file.", ephemeral=True)
+            await interaction.response.send_message("קובץ התמונה האופציונלי חייב להיות תמונה.", ephemeral=True)
             return
 
         system = await self.bot.services.systems.create_system(
@@ -74,17 +74,17 @@ class SystemsCog(commands.Cog):
             roblox_gamepass_reference=roblox_gamepass,
         )
         await interaction.response.send_message(
-            "System stored successfully.",
+            "המערכת נשמרה בהצלחה באחסון.",
             embed=self.bot.services.systems.build_embed(system),
             ephemeral=True,
         )
 
-    @app_commands.command(name="removesystem", description="Choose a stored system from a dropdown and delete it.")
+    @app_commands.command(name="removesystem", description="בחירת מערכת שמורה והסרתה מהרשימה בלי למחוק את הקבצים שלה לצמיתות.")
     @admin_only()
     async def removesystem(self, interaction: discord.Interaction) -> None:
         systems = await self.bot.services.systems.list_systems()
         if not systems:
-            await interaction.response.send_message("There are no systems to remove.", ephemeral=True)
+            await interaction.response.send_message("אין כרגע מערכות להסרה.", ephemeral=True)
             return
 
         async def on_selected(
@@ -94,20 +94,20 @@ class SystemsCog(commands.Cog):
         ) -> None:
             selected_system = system
             embed = self.bot.services.systems.build_embed(selected_system)
-            embed.title = f"Delete {selected_system.name}?"
+            embed.title = f"להסיר את {selected_system.name}?"
             embed.color = discord.Color.orange()
 
             async def on_confirm(confirm_interaction: discord.Interaction, view: ConfirmView) -> None:
                 deleted = await self.bot.services.systems.delete_system(selected_system.id)
                 await confirm_interaction.response.edit_message(
-                    content=f"Deleted system **{deleted.name}**.",
+                    content=f"המערכת **{deleted.name}** הוסרה מהרשימה והקבצים שלה הועברו לארכיון.",
                     embed=None,
                     view=view,
                 )
 
             confirm_view = ConfirmView(actor_id=interaction.user.id, on_confirm=on_confirm)
             await select_interaction.response.edit_message(
-                content="Confirm deletion for the selected system.",
+                content="אשר את ההסרה של המערכת שנבחרה.",
                 embed=embed,
                 view=confirm_view,
             )
@@ -115,7 +115,7 @@ class SystemsCog(commands.Cog):
         view = PaginatedSelectView(
             actor_id=interaction.user.id,
             items=systems,
-            placeholder="Select a system to remove",
+            placeholder="בחר מערכת להסרה",
             option_builder=lambda system: discord.SelectOption(
                 label=system.name[:100],
                 description=system.description[:100],
@@ -125,7 +125,7 @@ class SystemsCog(commands.Cog):
             on_selected=on_selected,
         )
         await interaction.response.send_message(
-            "Select the system you want to delete.",
+            "בחר את המערכת שתרצה להסיר מהרשימה.",
             view=view,
             ephemeral=True,
         )

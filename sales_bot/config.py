@@ -78,7 +78,21 @@ class Settings:
         if not sqlite_path.is_absolute():
             sqlite_path = base_dir / sqlite_path
 
-        data_dir = sqlite_path.parent
+        data_dir_raw = _optional_env("DATA_DIR")
+        if data_dir_raw:
+            data_dir = Path(data_dir_raw)
+            if not data_dir.is_absolute():
+                data_dir = base_dir / data_dir
+        else:
+            data_dir = sqlite_path.parent
+
+        database_url = _optional_env("DATABASE_URL")
+        if database_url and not data_dir_raw:
+            raise ConfigurationError(
+                "When DATABASE_URL is configured, DATA_DIR must also be set to persistent storage. "
+                "This prevents system files from being lost on redeploy."
+            )
+
         public_base_url = os.getenv("PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/")
         roblox_redirect_uri = _optional_env("ROBLOX_REDIRECT_URI") or f"{public_base_url}/oauth/roblox/callback"
         roblox_entry_link = _optional_env("ROBLOX_ENTRY_LINK") or f"{public_base_url}/link"
@@ -103,7 +117,7 @@ class Settings:
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=int(os.getenv("WEB_PORT", os.getenv("PORT", "8080"))),
             sqlite_path=sqlite_path,
-            database_url=_optional_env("DATABASE_URL"),
+            database_url=database_url,
             data_dir=data_dir,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),
@@ -114,4 +128,5 @@ class Settings:
 
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         (settings.data_dir / "systems").mkdir(parents=True, exist_ok=True)
+        (settings.data_dir / "archive").mkdir(parents=True, exist_ok=True)
         return settings
