@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import socket
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiosqlite
 import asyncpg
 
 
 type PgOperationResult = Any
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Database:
@@ -34,7 +40,7 @@ class Database:
 
     async def connect(self) -> None:
         if self.database_url:
-            self._pg_connection = await asyncpg.connect(self.database_url)
+            self._pg_connection = await self._connect_postgres(self.database_url)
             schema_path = self.schema_path.with_name("schema_postgres.sql")
             schema = schema_path.read_text(encoding="utf-8")
             await self._pg_connection.execute(schema)
@@ -169,3 +175,63 @@ class Database:
         assert isinstance(pg_connection, asyncpg.Connection)
         async with self._pg_lock:
             return await operation(pg_connection)
+
+    async def _connect_postgres(self, database_url: str) -> asyncpg.Connection:
+        candidates = self._postgres_connection_candidates(database_url)
+        last_error: Exception | None = None
+
+        for attempt in range(1, 4):
+            for index, candidate in enumerate(candidates):
+                try:
+                    if index > 0:
+                        LOGGER.warning("Retrying PostgreSQL connection using resolved IPv4 address (attempt %s)", attempt)
+                    return await asyncpg.connect(candidate, timeout=15)
+                except (OSError, ConnectionError, asyncpg.CannotConnectNowError) as exc:
+                    last_error = exc
+
+            if attempt < 3:
+                await asyncio.sleep(attempt)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("PostgreSQL connection failed before any attempt completed.")
+
+    @staticmethod
+    def _postgres_connection_candidates(database_url: str) -> list[str]:
+        candidates = [database_url]
+        parsed = urlsplit(database_url)
+        host = parsed.hostname
+        port = parsed.port or 5432
+
+        if not host:
+            return candidates
+
+        try:
+            address_info = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+        except OSError:
+            return candidates
+
+        seen_hosts = {host}
+        for _, _, _, _, sockaddr in address_info:
+            resolved_host = sockaddr[0]
+            if resolved_host in seen_hosts:
+                continue
+            seen_hosts.add(resolved_host)
+            candidates.append(Database._replace_url_host(parsed, resolved_host))
+
+        return candidates
+
+    @staticmethod
+    def _replace_url_host(parsed_url: Any, new_host: str) -> str:
+        netloc = ""
+        if parsed_url.username is not None:
+            netloc += quote(parsed_url.username, safe="")
+            if parsed_url.password is not None:
+                netloc += ":" + quote(parsed_url.password, safe="")
+            netloc += "@"
+
+        netloc += new_host
+        if parsed_url.port is not None:
+            netloc += f":{parsed_url.port}"
+
+        return urlunsplit((parsed_url.scheme, netloc, parsed_url.path, parsed_url.query, parsed_url.fragment))
