@@ -31,6 +31,13 @@ GIVEAWAY_ENTRY_EMOJI = "🎉"
 SYSTEM_RANDOM = random.SystemRandom()
 
 
+def _serialize_poll_options(options: Sequence[PollOption]) -> str:
+    return json.dumps(
+        [{"emoji": option.emoji, "label": option.label} for option in options],
+        ensure_ascii=False,
+    )
+
+
 def _parse_datetime(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -111,7 +118,7 @@ class PollService:
             (
                 channel_id,
                 clean_question,
-                json.dumps([option.__dict__ for option in normalized_options], ensure_ascii=False),
+                _serialize_poll_options(normalized_options),
                 duration_value,
                 duration_unit,
                 ends_at,
@@ -156,7 +163,7 @@ class PollService:
             duration_value=duration_value,
             duration_unit=duration_unit,
             ends_at=ends_at.isoformat(),
-            status="active",
+            status="פעיל",
             result_json=None,
             created_by=current.created_by,
             created_at=current.created_at,
@@ -192,7 +199,7 @@ class PollService:
                 duration_value = ?,
                 duration_unit = ?,
                 ends_at = ?,
-                status = 'active',
+                status = 'פעיל',
                 result_json = NULL,
                 updated_at = CURRENT_TIMESTAMP,
                 closed_at = NULL
@@ -202,7 +209,7 @@ class PollService:
                 channel_id,
                 message_id,
                 clean_question,
-                json.dumps([option.__dict__ for option in normalized_options], ensure_ascii=False),
+                _serialize_poll_options(normalized_options),
                 duration_value,
                 duration_unit,
                 ends_at,
@@ -248,25 +255,25 @@ class PollService:
         embed = discord.Embed(
             title=f"Poll #{poll.id}",
             description=poll.question,
-            color=discord.Color.blurple() if poll.status == "active" else discord.Color.dark_grey(),
+            color=discord.Color.blurple() if poll.status == "פעיל" else discord.Color.dark_grey(),
         )
-        embed.add_field(name="Status", value=poll.status.title(), inline=True)
-        embed.add_field(name="ID", value=str(poll.id), inline=True)
-        embed.add_field(name="Ends", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
+        embed.add_field(name="סטטוס", value=poll.status.title(), inline=True)
+        embed.add_field(name="איידי", value=str(poll.id), inline=True)
+        embed.add_field(name="מסתיים ב:", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
 
         option_lines = [f"{option.emoji} {option.label}" for option in poll.options]
         for index, chunk in enumerate(_chunk_lines(option_lines), start=1):
-            field_name = "Options" if index == 1 else f"Options {index}"
+            field_name = "אפשרויות" if index == 1 else f"אפשרויות {index}"
             embed.add_field(name=field_name, value=chunk, inline=False)
 
         if poll.result_json:
             results = json.loads(poll.result_json)
             result_lines = [
-                f"{item['emoji']} {item['label']} - {item['votes']} vote(s)"
+                f"{item['emoji']} {item['label']} - {item['votes']} הצבעה(ות)"
                 for item in results
             ]
             for index, chunk in enumerate(_chunk_lines(result_lines), start=1):
-                field_name = "Results" if index == 1 else f"Results {index}"
+                field_name = "תוצאות" if index == 1 else f"תוצאות {index}"
                 embed.add_field(name=field_name, value=chunk, inline=False)
 
         embed.set_footer(text="Magic Studio's")
@@ -468,7 +475,7 @@ class GiveawayService:
             duration_value=duration_value,
             duration_unit=duration_unit,
             ends_at=ends_at.isoformat(),
-            status="active",
+            status="פעיל",
             result_json=None,
             created_by=current.created_by,
             created_at=current.created_at,
@@ -556,11 +563,11 @@ class GiveawayService:
                 if result_payload["winner_ids"]:
                     winners = " ".join(f"<@{winner_id}>" for winner_id in result_payload["winner_ids"])
                     await message.channel.send(
-                        f"🎉 Giveaway #{finalized_giveaway.id} has ended. Congratulations {winners}!"
+                        f"🎉 הגרלה מספר #{finalized_giveaway.id} הסתיימה. מזל טוב {winners}!"
                     )
                 else:
                     await message.channel.send(
-                        f"🎉 Giveaway #{finalized_giveaway.id} has ended with no valid entries."
+                        f"🎉 הגרלה מספר #{finalized_giveaway.id} הסתיימה ללא משתתפים תקפים."
                     )
             except (ExternalServiceError, NotFoundError, discord.HTTPException):
                 pass
@@ -570,25 +577,25 @@ class GiveawayService:
     def build_embed(self, giveaway: GiveawayRecord) -> discord.Embed:
         ends_at = _parse_datetime(giveaway.ends_at)
         embed = discord.Embed(
-            title=f"🎉 Giveaway #{giveaway.id}: {giveaway.title}",
-            description=giveaway.description or "React with 🎉 to enter.",
-            color=discord.Color.green() if giveaway.status == "active" else discord.Color.dark_grey(),
+            title=f"🎉 הגרלה מספר #{giveaway.id}: {giveaway.title}",
+            description=giveaway.description or "לחצו על הריאקשן 🎉 בכדי להכנס להגרלה.",
+            color=discord.Color.green() if giveaway.status == "פעיל" else discord.Color.dark_grey(),
         )
-        embed.add_field(name="Status", value=giveaway.status.title(), inline=True)
+        embed.add_field(name="סטטוס", value=giveaway.status.title(), inline=True)
         embed.add_field(name="ID", value=str(giveaway.id), inline=True)
-        embed.add_field(name="Winners", value=str(giveaway.winner_count), inline=True)
-        embed.add_field(name="Ends", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
-        embed.add_field(name="How to Join", value=f"React with {GIVEAWAY_ENTRY_EMOJI}", inline=False)
-        embed.add_field(name="Requirements", value=giveaway.requirements or "No extra requirements.", inline=False)
+        embed.add_field(name="זוכים", value=str(giveaway.winner_count), inline=True)
+        embed.add_field(name="מסתיים ב", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
+        embed.add_field(name="כיצד להצטרף", value=f"לחצו על הריאקשן {GIVEAWAY_ENTRY_EMOJI}", inline=False)
+        embed.add_field(name="דרישות", value=giveaway.requirements or "אין דרישות נוספות.", inline=False)
 
         if giveaway.result_json:
             result_payload = json.loads(giveaway.result_json)
             winners = result_payload.get("winner_ids", [])
             entrant_count = int(result_payload.get("entrant_count", 0))
-            embed.add_field(name="Entrants", value=str(entrant_count), inline=True)
+            embed.add_field(name="משתתפים", value=str(entrant_count), inline=True)
             embed.add_field(
-                name="Winners Picked",
-                value=" ".join(f"<@{winner_id}>" for winner_id in winners) if winners else "No valid winners.",
+                name="זוכים נבחרו",
+                value=" ".join(f"<@{winner_id}>" for winner_id in winners) if winners else "אין זוכים תקפים.",
                 inline=False,
             )
 
