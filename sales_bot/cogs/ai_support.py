@@ -41,9 +41,10 @@ class AISupportCog(commands.Cog):
         if message.channel.id != self.bot.settings.ai_support_channel_id:
             return
 
+        author_is_admin = await self.bot.services.admins.is_admin(message.author.id)
         training_state = await self.bot.services.ai_assistant.get_training_state()
         if training_state.is_active:
-            if await self.bot.services.admins.is_admin(message.author.id):
+            if author_is_admin:
                 record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
                 if record is not None:
                     try:
@@ -75,7 +76,11 @@ class AISupportCog(commands.Cog):
 
         try:
             async with message.channel.typing():
-                answer = await self.bot.services.ai_assistant.answer_message(self.bot.http_session, message)
+                answer = await self.bot.services.ai_assistant.answer_message(
+                    self.bot.http_session,
+                    message,
+                    author_is_admin=author_is_admin,
+                )
         except ExternalServiceError as exc:
             try:
                 await message.reply(str(exc), mention_author=False)

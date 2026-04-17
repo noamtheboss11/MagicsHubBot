@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9\u0590-\u05FF_]{2,}")
 URL_PATTERN = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 COMMAND_PATTERN = re.compile(r"/([a-z0-9_]+)")
+GLOSSARY_PATTERN = re.compile(r"^\s*(?:[-•]\s*)?([A-Za-z][A-Za-z0-9 ._/-]{1,40})\s*(?:->|=>|→)\s*(.{1,80})$", re.MULTILINE)
 TEXT_FILE_EXTENSIONS = {
     ".txt",
     ".md",
@@ -56,11 +57,53 @@ MAX_IMAGE_ATTACHMENTS = 3
 MAX_IMAGE_BYTES = 4_000_000
 MAX_KNOWLEDGE_BLOCKS = 4
 MAX_KNOWLEDGE_BLOCK_CHARS = 650
+MAX_PROFILE_RECORDS = 80
+MAX_PROFILE_GLOSSARY_ITEMS = 12
 DEFAULT_MAX_OUTPUT_TOKENS = 220
 MULTIMODAL_MAX_OUTPUT_TOKENS = 260
 TRAINING_IMAGE_SUMMARY_TOKENS = 320
 GEMINI_PRIMARY_MODEL = "gemini-2.5-flash"
 GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)
+AUTO_LEARN_MIN_TEXT_CHARS = 160
+AUTO_LEARN_MAX_TEXT_CHARS = 3_200
+
+PASSIVE_LEARNING_KEYWORDS = {
+    "important",
+    "remember",
+    "rule",
+    "rules",
+    "always",
+    "never",
+    "from now on",
+    "important info",
+    "חשוב",
+    "חשובה",
+    "תזכור",
+    "תזכרי",
+    "כלל",
+    "כללים",
+    "חייב",
+    "חייבים",
+    "תמיד",
+    "אסור",
+    "מעתה",
+}
+HEBREW_ONLY_HINTS = {
+    "עברית בלבד",
+    "רק בעברית",
+    "להשיב בעברית",
+    "לענות בעברית",
+    "reply in hebrew",
+    "answer in hebrew",
+    "hebrew only",
+}
+ENGLISH_ONLY_HINTS = {
+    "english only",
+    "reply in english",
+    "answer in english",
+    "באנגלית בלבד",
+    "לענות באנגלית",
+}
 
 HOW_TO_KEYWORDS = {
     "how",
@@ -209,6 +252,13 @@ class CommandGuide:
     source_file: str
 
 
+@dataclass(slots=True)
+class ResponseProfile:
+    force_hebrew: bool = False
+    force_english: bool = False
+    glossary: tuple[tuple[str, str], ...] = ()
+
+
 def _normalize_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold().strip()
 
@@ -282,6 +332,7 @@ class AIAssistantService:
         session: aiohttp.ClientSession | None,
     ) -> AIKnowledgeRecord | None:
         parts: list[str] = []
+        parts.append("Trusted admin training entry.")
         content = message.content.strip()
         if content:
             parts.append(f"Admin training note:\n{self._truncate(content, MAX_STORED_SOURCE_CHARS)}")
@@ -309,6 +360,51 @@ class AIAssistantService:
             source_message_id=message.id,
         )
 
+    async def maybe_learn_from_message(
+        self,
+        message: discord.Message,
+        session: aiohttp.ClientSession | None,
+        *,
+        author_is_admin: bool,
+        text_sources: Sequence[str] | None = None,
+    ) -> AIKnowledgeRecord | None:
+        if await self._knowledge_exists_for_message(message.id):
+            return None
+
+        content = message.content.strip()
+        prepared_sources = list(text_sources or [])
+        has_sources = bool(prepared_sources)
+        if not self._should_passively_learn(
+            message,
+            author_is_admin=author_is_admin,
+            has_sources=has_sources,
+        ):
+            return None
+
+        parts: list[str] = ["Passive learned context."]
+        if content and self._should_store_passive_text(content, author_is_admin=author_is_admin):
+            parts.append(f"Passive user note:\n{self._truncate(content, AUTO_LEARN_MAX_TEXT_CHARS)}")
+
+        if prepared_sources:
+            parts.extend(prepared_sources[:2])
+
+        attachment_lines = [
+            f"{attachment.filename}: {attachment.url}"
+            for attachment in message.attachments[:4]
+        ]
+        if attachment_lines:
+            parts.append("Attachment references:\n" + "\n".join(attachment_lines))
+
+        if len(parts) == 1:
+            return None
+
+        return await self.add_knowledge(
+            content="\n\n".join(parts),
+            created_by=message.author.id,
+            source_channel_id=message.channel.id,
+            source_message_id=message.id,
+        )
+
     async def search_knowledge(self, question: str, *, limit: int = MAX_KNOWLEDGE_BLOCKS) -> list[AIKnowledgeRecord]:
         normalized_question = _normalize_text(question)
         if not normalized_question:
@@ -317,62 +413,108 @@ class AIAssistantService:
         stored_rows = await self.database.fetchall(
             "SELECT * FROM ai_knowledge_entries ORDER BY created_at DESC LIMIT 500"
         )
-        records = [self._map_knowledge(row) for row in stored_rows]
-        records.extend(await self._build_builtin_knowledge())
+        stored_records = [self._map_knowledge(row) for row in stored_rows]
+        builtin_records = await self._build_builtin_knowledge()
 
         question_tokens = set(TOKEN_PATTERN.findall(normalized_question))
         if not question_tokens:
             question_tokens = {normalized_question}
 
-        scored_records: list[tuple[float, AIKnowledgeRecord]] = []
-        for record in records:
-            normalized_content = _normalize_text(record.content)
-            content_tokens = set(TOKEN_PATTERN.findall(normalized_content))
-            overlap = len(question_tokens & content_tokens)
-            phrase_bonus = 2.0 if normalized_question and normalized_question in normalized_content else 0.0
-            if overlap == 0 and phrase_bonus == 0:
-                continue
-            scored_records.append((overlap + phrase_bonus, record))
+        stored_scored = self._score_knowledge_records(stored_records, question_tokens, normalized_question)
+        builtin_scored = self._score_knowledge_records(builtin_records, question_tokens, normalized_question)
 
-        scored_records.sort(key=lambda item: item[0], reverse=True)
-        return [record for _, record in scored_records[:limit]]
+        results = [record for _, record in stored_scored[:limit]]
+        remaining = max(0, limit - len(results))
+        if remaining > 0:
+            results.extend(record for _, record in builtin_scored[:remaining])
+        return results
 
-    async def answer_message(self, session: aiohttp.ClientSession, message: discord.Message) -> str:
+    async def answer_message(
+        self,
+        session: aiohttp.ClientSession,
+        message: discord.Message,
+        *,
+        author_is_admin: bool = False,
+    ) -> str:
         question = message.content.strip()
         text_sources = await self._extract_message_text_sources(session, message, store_for_training=False)
         search_text = question or "\n".join(text_sources[:1])
         knowledge = await self.search_knowledge(search_text)
         image_parts = await self._extract_image_parts(message)
+        response_profile = await self.get_response_profile()
 
         if image_parts or text_sources:
             if not self.settings.gemini_api_key:
-                return self._build_local_answer(
+                answer = self._build_local_answer(
                     question,
                     knowledge,
                     text_sources,
+                    response_profile=response_profile,
                     image_unprocessed=bool(image_parts),
                 )
+                await self.maybe_learn_from_message(
+                    message,
+                    session,
+                    author_is_admin=author_is_admin,
+                    text_sources=text_sources,
+                )
+                return answer
 
-            prompt = self._build_multimodal_prompt(question, knowledge, text_sources, image_attached=bool(image_parts))
+            prompt = self._build_multimodal_prompt(
+                question,
+                knowledge,
+                text_sources,
+                response_profile=response_profile,
+                image_attached=bool(image_parts),
+            )
             try:
-                return await self._call_gemini(
+                answer = await self._call_gemini(
                     session,
                     [{"text": prompt}, *image_parts],
                     max_output_tokens=MULTIMODAL_MAX_OUTPUT_TOKENS,
                 )
+                answer = self._apply_response_profile(answer, response_profile)
             except ExternalServiceError as exc:
-                return self._build_live_ai_unavailable_answer(
+                answer = self._build_live_ai_unavailable_answer(
                     question,
                     knowledge,
                     text_sources,
+                    response_profile=response_profile,
                     image_unprocessed=bool(image_parts),
                     reason=str(exc),
                 )
+            await self.maybe_learn_from_message(
+                message,
+                session,
+                author_is_admin=author_is_admin,
+                text_sources=text_sources,
+            )
+            return answer
 
         if knowledge:
-            return self._build_local_answer(question, knowledge, [])
+            answer = self._build_local_answer(question, knowledge, [], response_profile=response_profile)
+            await self.maybe_learn_from_message(
+                message,
+                session,
+                author_is_admin=author_is_admin,
+                text_sources=text_sources,
+            )
+            return answer
 
-        return self._fallback_unknown_answer(question)
+        answer = self._fallback_unknown_answer(question)
+        await self.maybe_learn_from_message(
+            message,
+            session,
+            author_is_admin=author_is_admin,
+            text_sources=text_sources,
+        )
+        return answer
+
+    async def get_response_profile(self) -> ResponseProfile:
+        rows = await self.database.fetchall(
+            f"SELECT * FROM ai_knowledge_entries ORDER BY created_at DESC LIMIT {MAX_PROFILE_RECORDS}"
+        )
+        return self._extract_response_profile([self._map_knowledge(row) for row in rows])
 
     def _build_multimodal_prompt(
         self,
@@ -380,6 +522,7 @@ class AIAssistantService:
         knowledge: Sequence[AIKnowledgeRecord],
         text_sources: Sequence[str],
         *,
+        response_profile: ResponseProfile,
         image_attached: bool,
     ) -> str:
         knowledge_blocks = []
@@ -399,6 +542,9 @@ class AIAssistantService:
             "Keep the answer concise, practical, and do not invent missing details.",
             f"User request:\n{request_label}",
         ]
+        profile_block = self._build_profile_prompt_block(response_profile)
+        if profile_block:
+            prompt_parts.insert(1, profile_block)
         if knowledge_blocks:
             prompt_parts.append("Bot knowledge:\n" + "\n\n".join(knowledge_blocks))
         if source_blocks:
@@ -835,33 +981,48 @@ class AIAssistantService:
         knowledge: Sequence[AIKnowledgeRecord],
         text_sources: Sequence[str],
         *,
+        response_profile: ResponseProfile | None = None,
         quota_limited: bool = False,
         image_unprocessed: bool = False,
     ) -> str:
         tokens = set(TOKEN_PATTERN.findall(_normalize_text(question)))
         guides = self._match_command_guides(question)
         lines = self._collect_supporting_lines(tokens, knowledge, text_sources)
+        is_hebrew_response = self._prefers_hebrew_response(question, response_profile)
 
         if not lines and not guides:
             if image_unprocessed:
                 return self._fallback_rate_limited_answer(question, image_only=True)
             return self._fallback_unknown_answer(question)
 
-        note = self._build_local_note(question, quota_limited=quota_limited, image_unprocessed=image_unprocessed)
-        scenario_body = self._build_scenario_answer(question, guides)
+        note = self._build_local_note(
+            is_hebrew=is_hebrew_response,
+            quota_limited=quota_limited,
+            image_unprocessed=image_unprocessed,
+        )
+        scenario_body = self._build_scenario_answer(question, guides, lines, is_hebrew=is_hebrew_response)
         if scenario_body:
-            return self._compose_local_answer(note, scenario_body)
+            return self._apply_response_profile(
+                self._compose_local_answer(note, scenario_body),
+                response_profile,
+            )
 
-        guide_body = self._build_command_guide_answer(question, guides, lines)
+        guide_body = self._build_command_guide_answer(guides, lines, is_hebrew=is_hebrew_response)
         if guide_body:
-            return self._compose_local_answer(note, guide_body)
+            return self._apply_response_profile(
+                self._compose_local_answer(note, guide_body),
+                response_profile,
+            )
 
-        if _contains_hebrew(question):
+        if is_hebrew_response:
             header = "הנה הפרטים הכי רלוונטיים שמצאתי בקוד ובמידע של הבוט:"
         else:
             header = "Here are the most relevant details I found in the bot code and data:"
         body = "\n".join(f"- {self._truncate(line, 220)}" for line in lines[:8])
-        return self._compose_local_answer(note, header + "\n" + body)
+        return self._apply_response_profile(
+            self._compose_local_answer(note, header + "\n" + body),
+            response_profile,
+        )
 
     def _collect_supporting_lines(
         self,
@@ -911,6 +1072,76 @@ class AIAssistantService:
         if matching_lines:
             return matching_lines[:4]
         return candidate_lines[:2]
+
+    def _score_knowledge_records(
+        self,
+        records: Sequence[AIKnowledgeRecord],
+        question_tokens: set[str],
+        normalized_question: str,
+    ) -> list[tuple[float, AIKnowledgeRecord]]:
+        scored_records: list[tuple[float, AIKnowledgeRecord]] = []
+        for record in records:
+            score = self._score_knowledge_record(record, question_tokens, normalized_question)
+            if score <= 0:
+                continue
+            scored_records.append((score, record))
+
+        scored_records.sort(
+            key=lambda item: (
+                item[0],
+                self._knowledge_sort_priority(item[1]),
+                item[1].id,
+            ),
+            reverse=True,
+        )
+        return scored_records
+
+    def _score_knowledge_record(
+        self,
+        record: AIKnowledgeRecord,
+        question_tokens: set[str],
+        normalized_question: str,
+    ) -> float:
+        normalized_content = _normalize_text(record.content)
+        content_tokens = set(TOKEN_PATTERN.findall(normalized_content))
+        overlap = len(question_tokens & content_tokens)
+        phrase_bonus = 2.0 if normalized_question and normalized_question in normalized_content else 0.0
+        if overlap == 0 and phrase_bonus == 0:
+            return 0.0
+
+        kind = self._knowledge_kind(record)
+        trust_bonus = 0.0
+        if kind == "admin-training":
+            trust_bonus += 3.5
+        elif kind == "passive-learning":
+            trust_bonus += 1.25
+        elif kind == "stored":
+            trust_bonus += 0.5
+
+        if self._is_instruction_like(record.content):
+            trust_bonus += 0.75
+
+        return (overlap * 1.5) + phrase_bonus + trust_bonus
+
+    def _knowledge_sort_priority(self, record: AIKnowledgeRecord) -> int:
+        kind = self._knowledge_kind(record)
+        if kind == "admin-training":
+            return 4
+        if kind == "passive-learning":
+            return 3
+        if kind == "stored":
+            return 2
+        return 1
+
+    def _knowledge_kind(self, record: AIKnowledgeRecord) -> str:
+        if record.id < 0:
+            return "builtin"
+        stripped = record.content.lstrip()
+        if stripped.startswith("Trusted admin training entry.") or stripped.startswith("Admin training note:"):
+            return "admin-training"
+        if stripped.startswith("Passive learned context.") or stripped.startswith("Passive user note:"):
+            return "passive-learning"
+        return "stored"
 
     def _candidate_models(self) -> list[str]:
         models: list[str] = []
@@ -1023,7 +1254,6 @@ class AIAssistantService:
         if not tokens:
             return None
 
-        is_hebrew = _contains_hebrew(question)
         has_link_intent = bool(tokens & LINK_KEYWORDS)
         has_buy_intent = bool(tokens & BUY_KEYWORDS)
         has_receive_intent = bool(tokens & RECEIVE_KEYWORDS)
@@ -1071,10 +1301,79 @@ class AIAssistantService:
 
         return None
 
-    def _build_flow_answer(
+    def _build_scenario_answer(
         self,
         question: str,
+        guides: Sequence[CommandGuide],
+        supporting_lines: Sequence[str],
+        *,
+        is_hebrew: bool,
+    ) -> str | None:
+        normalized = _normalize_text(question)
+        tokens = set(TOKEN_PATTERN.findall(normalized))
+        if not tokens:
+            return None
+
+        has_link_intent = bool(tokens & LINK_KEYWORDS)
+        has_buy_intent = bool(tokens & BUY_KEYWORDS)
+        has_receive_intent = bool(tokens & RECEIVE_KEYWORDS)
+        has_order_intent = bool(tokens & ORDER_KEYWORDS)
+        has_system_intent = bool(tokens & SYSTEM_KEYWORDS)
+
+        if has_link_intent and (has_buy_intent or has_receive_intent):
+            return self._build_flow_answer(
+                ["link", "linkedaccount", "buywithpaypal", "buywithrobux", "getsystem"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="לפי הזרימה שממומשת בבוט, זה הסדר הנכון:",
+                title_en="Based on the flow implemented in the bot, this is the right order:",
+            )
+
+        if has_link_intent:
+            return self._build_flow_answer(
+                ["link", "linkedaccount"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה קישור חשבון רובלוקס עובד בבוט:",
+                title_en="This is how Roblox account linking works in the bot:",
+            )
+
+        if has_buy_intent and has_receive_intent:
+            return self._build_flow_answer(
+                ["buywithpaypal", "buywithrobux", "getsystem", "linkedaccount"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה קנייה ומסירה עובדות בבוט:",
+                title_en="This is how purchase and delivery work in the bot:",
+            )
+
+        if has_order_intent:
+            return self._build_flow_answer(
+                ["sendorderpanel", "list"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה מערכת ההזמנות עובדת לפי הקוד של הבוט:",
+                title_en="This is how the order system works according to the bot code:",
+            )
+
+        if has_system_intent and any(keyword in normalized for keyword in {"edit", "add", "send", "remove", "admin", "לערוך", "להוסיף", "לשלוח", "אדמין"}):
+            return self._build_flow_answer(
+                ["addsystem", "editsystem", "sendsystem", "systemslist"],
+                supporting_lines,
+                is_hebrew=is_hebrew,
+                title_he="ככה ניהול מערכות עובד בבוט:",
+                title_en="This is how system management works in the bot:",
+            )
+
+        if guides and self._is_how_to_question(tokens):
+            return self._build_command_guide_answer(guides, supporting_lines, is_hebrew=is_hebrew)
+
+        return None
+
+    def _build_flow_answer(
+        self,
         command_order: Sequence[str],
+        supporting_lines: Sequence[str],
         *,
         is_hebrew: bool,
         title_he: str,
@@ -1096,18 +1395,22 @@ class AIAssistantService:
         elif not is_hebrew and not self.settings.roblox_oauth_enabled and "link" in command_order:
             lines.append("Note: `/link` only works after the Roblox OAuth environment variables are configured for the bot.")
 
+        extra_facts = self._build_supporting_fact_block(supporting_lines, is_hebrew=is_hebrew)
+        if extra_facts:
+            lines.append(extra_facts)
+
         return "\n".join(lines)
 
     def _build_command_guide_answer(
         self,
-        question: str,
         guides: Sequence[CommandGuide],
         supporting_lines: Sequence[str],
+        *,
+        is_hebrew: bool,
     ) -> str | None:
         if not guides:
             return None
 
-        is_hebrew = _contains_hebrew(question)
         intro = (
             "לפי הפקודות והקוד של הבוט, זה מה שצריך לדעת:"
             if is_hebrew
@@ -1126,6 +1429,23 @@ class AIAssistantService:
                 lines.append(f"- {self._truncate(line, 220)}")
 
         return "\n".join(lines)
+
+    def _build_supporting_fact_block(self, supporting_lines: Sequence[str], *, is_hebrew: bool) -> str | None:
+        filtered_lines = [
+            self._truncate(line, 220)
+            for line in supporting_lines[:3]
+            if line
+            and not line.casefold().startswith("command /")
+            and not line.casefold().startswith("description /")
+            and not line.casefold().startswith("parameters /")
+            and not line.casefold().startswith("source file")
+            and not re.match(r"^[a-z_]+:\s", line)
+        ]
+        if not filtered_lines:
+            return None
+        title = "חשוב גם לדעת:" if is_hebrew else "Also important:"
+        body = "\n".join(f"- {line}" for line in filtered_lines)
+        return f"{title}\n{body}"
 
     def _format_command_guide(self, guide: CommandGuide, *, is_hebrew: bool) -> str:
         detail = COMMAND_DETAIL_OVERRIDES.get(guide.name, {}).get("he" if is_hebrew else "en") or guide.description
@@ -1173,8 +1493,8 @@ class AIAssistantService:
             return "פרמטרים חשובים: " + ", ".join(labels)
         return "important parameters: " + ", ".join(labels)
 
-    def _build_local_note(self, question: str, *, quota_limited: bool, image_unprocessed: bool) -> str | None:
-        if _contains_hebrew(question):
+    def _build_local_note(self, *, is_hebrew: bool, quota_limited: bool, image_unprocessed: bool) -> str | None:
+        if is_hebrew:
             quota_note = "מכסת Gemini כרגע מוגבלת, אז לא השתמשתי בתשובה חיצונית."
             image_note = "עיבוד תמונה חי לא היה זמין כרגע, אז נשענתי רק על הטקסט והקוד המקומי."
         else:
@@ -1195,6 +1515,129 @@ class AIAssistantService:
         if note:
             return "\n\n".join([note, body])
         return body
+
+    def _prefers_hebrew_response(self, question: str, response_profile: ResponseProfile | None) -> bool:
+        if response_profile is not None:
+            if response_profile.force_hebrew and not response_profile.force_english:
+                return True
+            if response_profile.force_english and not response_profile.force_hebrew:
+                return False
+        return _contains_hebrew(question)
+
+    def _extract_response_profile(self, records: Sequence[AIKnowledgeRecord]) -> ResponseProfile:
+        force_hebrew = False
+        force_english = False
+        glossary: dict[str, str] = {}
+        for record in records:
+            if self._knowledge_kind(record) != "admin-training":
+                continue
+            normalized_content = _normalize_text(record.content)
+            if not force_hebrew and any(hint in normalized_content for hint in HEBREW_ONLY_HINTS):
+                force_hebrew = True
+            if not force_english and any(hint in normalized_content for hint in ENGLISH_ONLY_HINTS):
+                force_english = True
+            for source_term, target_term in self._extract_glossary_pairs(record.content):
+                key = source_term.casefold()
+                if key in glossary:
+                    continue
+                glossary[key] = target_term
+                if len(glossary) >= MAX_PROFILE_GLOSSARY_ITEMS:
+                    break
+
+        glossary_items = tuple((source, target) for source, target in glossary.items())
+        return ResponseProfile(
+            force_hebrew=force_hebrew,
+            force_english=force_english,
+            glossary=glossary_items,
+        )
+
+    def _build_profile_prompt_block(self, response_profile: ResponseProfile) -> str | None:
+        lines: list[str] = []
+        if response_profile.force_hebrew and not response_profile.force_english:
+            lines.append("Trained response rule: reply in Hebrew.")
+        elif response_profile.force_english and not response_profile.force_hebrew:
+            lines.append("Trained response rule: reply in English.")
+
+        if response_profile.glossary:
+            lines.append("Preferred trained glossary:")
+            for source, target in response_profile.glossary[:6]:
+                lines.append(f"- {source} -> {target}")
+
+        if not lines:
+            return None
+        return "\n".join(lines)
+
+    def _apply_response_profile(self, text: str, response_profile: ResponseProfile | None) -> str:
+        if response_profile is None or not response_profile.glossary:
+            return text
+
+        updated = text
+        for source_term, target_term in sorted(
+            response_profile.glossary,
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
+            pattern = re.compile(rf"(?<!/)\b{re.escape(source_term)}\b", re.IGNORECASE)
+            updated = pattern.sub(target_term, updated)
+        return updated
+
+    def _extract_glossary_pairs(self, content: str) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for match in GLOSSARY_PATTERN.finditer(content):
+            source = match.group(1).strip().strip('"\'')
+            target = match.group(2).strip().strip('"\'')
+            if not source or not target:
+                continue
+            pairs.append((source, target))
+        return pairs
+
+    def _is_instruction_like(self, content: str) -> bool:
+        normalized = _normalize_text(content)
+        if any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS):
+            return True
+        if any(hint in normalized for hint in HEBREW_ONLY_HINTS | ENGLISH_ONLY_HINTS):
+            return True
+        return bool(GLOSSARY_PATTERN.search(content))
+
+    async def _knowledge_exists_for_message(self, message_id: int) -> bool:
+        row = await self.database.fetchone(
+            "SELECT 1 FROM ai_knowledge_entries WHERE source_message_id = ? LIMIT 1",
+            (message_id,),
+        )
+        return row is not None
+
+    def _should_passively_learn(
+        self,
+        message: discord.Message,
+        *,
+        author_is_admin: bool,
+        has_sources: bool,
+    ) -> bool:
+        content = message.content.strip()
+        if has_sources:
+            return True
+        if not content:
+            return False
+        normalized = _normalize_text(content)
+        if author_is_admin and self._is_instruction_like(content):
+            return True
+        if len(content) < AUTO_LEARN_MIN_TEXT_CHARS:
+            return False
+        if content.count("?") > 1 or normalized.startswith("/"):
+            return False
+        if any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS):
+            return True
+        return author_is_admin and len(content.splitlines()) >= 2
+
+    def _should_store_passive_text(self, content: str, *, author_is_admin: bool) -> bool:
+        normalized = _normalize_text(content)
+        if author_is_admin:
+            return True
+        if len(content) < AUTO_LEARN_MIN_TEXT_CHARS:
+            return False
+        if content.count("?") > 1:
+            return False
+        return any(keyword in normalized for keyword in PASSIVE_LEARNING_KEYWORDS) or len(content.splitlines()) >= 2
 
     @staticmethod
     def _is_how_to_question(tokens: set[str]) -> bool:
@@ -1260,6 +1703,7 @@ class AIAssistantService:
         knowledge: Sequence[AIKnowledgeRecord],
         text_sources: Sequence[str],
         *,
+        response_profile: ResponseProfile | None,
         image_unprocessed: bool,
         reason: str,
     ) -> str:
@@ -1268,6 +1712,7 @@ class AIAssistantService:
                 question,
                 knowledge,
                 text_sources,
+                response_profile=response_profile,
                 quota_limited=self._looks_like_quota_error(reason),
                 image_unprocessed=image_unprocessed,
             )
