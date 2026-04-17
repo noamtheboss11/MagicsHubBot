@@ -15,6 +15,14 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _require_int_env(name: str) -> int:
+    raw = _require_env(name).strip()
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"Environment variable {name} must be a valid integer.") from exc
+
+
 def _optional_env(name: str) -> str | None:
     value = os.getenv(name, "").strip()
     return value or None
@@ -23,6 +31,16 @@ def _optional_env(name: str) -> str | None:
 def _optional_int(name: str) -> int | None:
     raw = os.getenv(name, "").strip()
     return int(raw) if raw else None
+
+
+def _int_with_default(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"Environment variable {name} must be a valid integer.") from exc
 
 
 def _optional_bool(name: str, default: bool) -> bool:
@@ -112,14 +130,14 @@ class Settings:
 
         settings = cls(
             discord_token=_require_env("DISCORD_TOKEN"),
-            discord_client_id=int(_require_env("DISCORD_CLIENT_ID")),
+            discord_client_id=_require_int_env("DISCORD_CLIENT_ID"),
             discord_client_secret=_require_env("DISCORD_CLIENT_SECRET"),
-            owner_user_id=int(os.getenv("OWNER_USER_ID", "1204103872348557372")),
+            owner_user_id=_int_with_default("OWNER_USER_ID", 1204103872348557372),
             primary_guild_id=_optional_int("PRIMARY_GUILD_ID") or _optional_int("DEV_GUILD_ID"),
-            vouch_channel_id=int(os.getenv("VOUCH_CHANNEL_ID", "1492468162372046908")),
-            order_channel_id=int(os.getenv("ORDER_CHANNEL_ID", "1492472669059285012")),
-            roblox_verified_role_id=int(os.getenv("ROBLOX_VERIFIED_ROLE_ID", "1494685982161768669")),
-            ai_support_channel_id=int(os.getenv("AI_SUPPORT_CHANNEL_ID", "1494689678975172710")),
+            vouch_channel_id=_int_with_default("VOUCH_CHANNEL_ID", 1492468162372046908),
+            order_channel_id=_int_with_default("ORDER_CHANNEL_ID", 1492472669059285012),
+            roblox_verified_role_id=_int_with_default("ROBLOX_VERIFIED_ROLE_ID", 1494685982161768669),
+            ai_support_channel_id=_int_with_default("AI_SUPPORT_CHANNEL_ID", 1494689678975172710),
             roblox_client_id=_optional_env("ROBLOX_CLIENT_ID"),
             roblox_client_secret=_optional_env("ROBLOX_CLIENT_SECRET"),
             roblox_redirect_uri=roblox_redirect_uri,
@@ -131,7 +149,7 @@ class Settings:
             public_base_url=public_base_url,
             paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
-            web_port=int(os.getenv("WEB_PORT", os.getenv("PORT", "8080"))),
+            web_port=_int_with_default("WEB_PORT", _int_with_default("PORT", 8080)),
             sqlite_path=sqlite_path,
             database_url=database_url,
             data_dir=data_dir,
@@ -139,8 +157,8 @@ class Settings:
             sync_commands_on_startup=_optional_bool("SYNC_COMMANDS_ON_STARTUP", True),
             dev_guild_id=_optional_int("DEV_GUILD_ID"),
             self_ping_enabled=_optional_bool("SELF_PING_ENABLED", True),
-            self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
-            admin_panel_session_minutes=int(os.getenv("ADMIN_PANEL_SESSION_MINUTES", "120")),
+            self_ping_interval_seconds=_int_with_default("SELF_PING_INTERVAL_SECONDS", 180),
+            admin_panel_session_minutes=_int_with_default("ADMIN_PANEL_SESSION_MINUTES", 120),
         )
 
         if not settings.database_url:
