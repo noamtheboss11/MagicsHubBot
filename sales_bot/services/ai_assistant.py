@@ -47,10 +47,10 @@ class AIAssistantService:
         await self.database.execute(
             """
             UPDATE ai_training_state
-            SET is_active = ?, started_by = ?, started_at = CURRENT_TIMESTAMP, ended_at = NULL
-            WHERE id = ?
+            SET is_active = TRUE, started_by = ?, started_at = CURRENT_TIMESTAMP, ended_at = NULL
+            WHERE id = 1
             """,
-            (True, admin_user_id, 1),
+            (admin_user_id,),
         )
         return await self.get_training_state()
 
@@ -59,10 +59,10 @@ class AIAssistantService:
         await self.database.execute(
             """
             UPDATE ai_training_state
-            SET is_active = ?, ended_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            SET is_active = FALSE, ended_at = CURRENT_TIMESTAMP
+            WHERE id = 1
             """,
-            (False, 1),
+            (),
         )
         return await self.get_training_state()
 
@@ -169,8 +169,8 @@ class AIAssistantService:
         if row is not None:
             return
         await self.database.execute(
-            "INSERT INTO ai_training_state (id, is_active) VALUES (?, ?)",
-            (1, False),
+            "INSERT INTO ai_training_state (id, is_active) VALUES (1, FALSE)",
+            (),
         )
 
     async def _build_builtin_knowledge(self) -> list[AIKnowledgeRecord]:

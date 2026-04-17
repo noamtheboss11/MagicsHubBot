@@ -232,12 +232,23 @@ async def _list_text_channels(bot: "SalesBot") -> list[discord.TextChannel]:
     if bot.settings.primary_guild_id is None:
         raise ConfigurationError("PRIMARY_GUILD_ID must be configured before using the admin web panels.")
 
-    guild = bot.get_guild(bot.settings.primary_guild_id)
-    if guild is None:
-        guild = await bot.fetch_guild(bot.settings.primary_guild_id)
-        channels = await guild.fetch_channels()
-    else:
-        channels = guild.channels
+    try:
+        guild = bot.get_guild(bot.settings.primary_guild_id)
+        if guild is None:
+            guild = await bot.fetch_guild(bot.settings.primary_guild_id)
+            channels = await guild.fetch_channels()
+        else:
+            channels = guild.channels
+            if not channels:
+                channels = await guild.fetch_channels()
+    except discord.Forbidden as exc:
+        raise PermissionDeniedError(
+            "The bot does not have permission to load channels from PRIMARY_GUILD_ID."
+        ) from exc
+    except discord.HTTPException as exc:
+        raise ConfigurationError(
+            "I could not load channels from PRIMARY_GUILD_ID. Check that the ID is correct and the bot is in that server."
+        ) from exc
 
     text_channels = [channel for channel in channels if isinstance(channel, discord.TextChannel)]
     if not text_channels:
