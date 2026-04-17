@@ -50,6 +50,20 @@ def _optional_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _normalized_gemini_model(raw: str | None) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return "gemini-2.5-flash"
+
+    if value.startswith("models/"):
+        value = value.split("/", 1)[1]
+
+    if value == "gemini-2.0-flash":
+        return "gemini-2.5-flash"
+
+    return value
+
+
 def _resolve_runtime_data_dir(base_dir: Path) -> Path:
     candidates = (
         base_dir / "data",
@@ -145,7 +159,7 @@ class Settings:
             roblox_privacy_policy_url=roblox_privacy_policy_url,
             roblox_terms_url=roblox_terms_url,
             gemini_api_key=_optional_env("GEMINI_API_KEY"),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_model=_normalized_gemini_model(os.getenv("GEMINI_MODEL")),
             public_base_url=public_base_url,
             paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),

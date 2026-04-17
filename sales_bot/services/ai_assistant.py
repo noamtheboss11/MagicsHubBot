@@ -56,6 +56,7 @@ MAX_KNOWLEDGE_BLOCK_CHARS = 650
 DEFAULT_MAX_OUTPUT_TOKENS = 220
 MULTIMODAL_MAX_OUTPUT_TOKENS = 260
 TRAINING_IMAGE_SUMMARY_TOKENS = 320
+GEMINI_PRIMARY_MODEL = "gemini-2.5-flash"
 GEMINI_FALLBACK_MODELS = ("gemini-2.5-flash",)
 
 
@@ -210,15 +211,13 @@ class AIAssistantService:
                     max_output_tokens=MULTIMODAL_MAX_OUTPUT_TOKENS,
                 )
             except ExternalServiceError as exc:
-                if self._looks_like_quota_error(str(exc)):
-                    return self._build_local_answer(
-                        question,
-                        knowledge,
-                        text_sources,
-                        quota_limited=True,
-                        image_unprocessed=bool(image_parts),
-                    )
-                raise
+                return self._build_live_ai_unavailable_answer(
+                    question,
+                    knowledge,
+                    text_sources,
+                    image_unprocessed=bool(image_parts),
+                    reason=str(exc),
+                )
 
         if knowledge:
             return self._build_local_answer(question, knowledge, [])
@@ -555,7 +554,7 @@ class AIAssistantService:
         except ExternalServiceError as exc:
             if self._looks_like_quota_error(str(exc)):
                 return "Image attachments were included, but Gemini quota was unavailable, so only non-image text could be stored."
-            raise
+            return "Image attachments were included, but live image extraction was unavailable, so only non-image text could be stored."
 
         return f"Image training summary:\n{self._truncate(summary, MAX_STORED_SOURCE_CHARS)}"
 
@@ -715,11 +714,41 @@ class AIAssistantService:
 
     def _candidate_models(self) -> list[str]:
         models: list[str] = []
-        for candidate in (self.settings.gemini_model, *GEMINI_FALLBACK_MODELS):
+        for candidate in (GEMINI_PRIMARY_MODEL, self.settings.gemini_model, *GEMINI_FALLBACK_MODELS):
             cleaned = candidate.strip()
             if cleaned and cleaned not in models:
                 models.append(cleaned)
         return models
+
+    def _build_live_ai_unavailable_answer(
+        self,
+        question: str,
+        knowledge: Sequence[AIKnowledgeRecord],
+        text_sources: Sequence[str],
+        *,
+        image_unprocessed: bool,
+        reason: str,
+    ) -> str:
+        if knowledge or text_sources:
+            return self._build_local_answer(
+                question,
+                knowledge,
+                text_sources,
+                quota_limited=self._looks_like_quota_error(reason),
+                image_unprocessed=image_unprocessed,
+            )
+
+        if self._looks_like_quota_error(reason):
+            return self._fallback_rate_limited_answer(question, image_only=image_unprocessed)
+
+        if _contains_hebrew(question):
+            if image_unprocessed:
+                return "עיבוד ה-AI החי לא היה זמין כרגע, ולכן לא הצלחתי לקרוא את התמונה. נסה שוב בעוד כמה רגעים או שלח גם טקסט."
+            return "עיבוד ה-AI החי לא היה זמין כרגע. נסה שוב בעוד כמה רגעים."
+
+        if image_unprocessed:
+            return "Live AI processing was unavailable right now, so I couldn't read the image. Try again shortly or include text with it."
+        return "Live AI processing was unavailable right now. Try again shortly."
 
     @staticmethod
     def _extract_public_urls(text: str) -> list[str]:
