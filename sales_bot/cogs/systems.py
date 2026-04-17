@@ -139,6 +139,55 @@ class SystemsCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="editsystem", description="Choose a stored system and open its edit panel.")
+    @admin_only()
+    async def editsystem(self, interaction: discord.Interaction) -> None:
+        systems = await self.bot.services.systems.list_systems()
+        if not systems:
+            await interaction.response.send_message("There are no systems to edit.", ephemeral=True)
+            return
+
+        async def on_selected(
+            select_interaction: discord.Interaction,
+            system: object,
+            parent_view: PaginatedSelectView,
+        ) -> None:
+            selected_system = system
+            session = await self.bot.services.panels.create_session(
+                admin_user_id=interaction.user.id,
+                panel_type="system-edit",
+                target_id=selected_system.id,
+            )
+            panel_url = (
+                f"{self.bot.settings.public_base_url}/admin/systems/{selected_system.id}/edit?token={session.token}"
+            )
+
+            embed = self.bot.services.systems.build_embed(selected_system)
+            embed.title = f"Edit {selected_system.name}"
+            embed.add_field(name="Edit Panel", value="Use the button below to change the name, description, file, image, PayPal link, or Roblox gamepass.", inline=False)
+
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="Open System Edit Panel", style=discord.ButtonStyle.link, url=panel_url))
+            await select_interaction.response.edit_message(content=None, embed=embed, view=view)
+
+        view = PaginatedSelectView(
+            actor_id=interaction.user.id,
+            items=systems,
+            placeholder="Select a system to edit",
+            option_builder=lambda system: discord.SelectOption(
+                label=system.name[:100],
+                description=system.description[:100],
+                value=str(system.id),
+            ),
+            value_getter=lambda system: str(system.id),
+            on_selected=on_selected,
+        )
+        await interaction.response.send_message(
+            "Select the system you want to edit.",
+            view=view,
+            ephemeral=True,
+        )
+
     @app_commands.command(name="sendsystem", description="Send a stored system to a user via DM.")
     @app_commands.describe(user="Recipient for the system delivery.", system="System to deliver.")
     @app_commands.autocomplete(system=system_autocomplete)

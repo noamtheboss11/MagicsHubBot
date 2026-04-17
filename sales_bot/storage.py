@@ -20,6 +20,14 @@ async def save_attachment(attachment: discord.Attachment, directory: Path) -> Pa
     return target
 
 
+def save_named_bytes(filename: str, data: bytes, directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    safe_filename = Path(filename).name or "upload.bin"
+    target = directory / f"{uuid4().hex}_{safe_filename}"
+    target.write_bytes(data)
+    return target
+
+
 def remove_path(path: str | Path | None) -> None:
     if not path:
         return

@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sales_bot.services.ai_assistant import AIAssistantService
 from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
 from sales_bot.services.delivery import DeliveryService
+from sales_bot.services.engagement import GiveawayService, PollService
 from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
+from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
@@ -24,3 +27,7 @@ class ServiceContainer:
     payments: PaymentService
     vouches: VouchService
     oauth: RobloxOAuthService
+    panels: AdminPanelService
+    polls: PollService
+    giveaways: GiveawayService
+    ai_assistant: AIAssistantService

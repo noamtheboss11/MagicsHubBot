@@ -64,6 +64,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/addadmin`
 - `/removeadmin`
 - `/addsystem`
+- `/editsystem`
 - `/systemslist`
 - `/removesystem`
 - `/sendsystem`
@@ -84,6 +85,13 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/vouches`
 - `/revokevouch`
 - `/link`
+- `/checkroblox`
+- `/poll`
+- `/editpoll`
+- `/giveaway`
+- `/editgiveaway`
+- `/trainbot`
+- `/endtraining`
 
 ## Feature Overview
 
@@ -98,10 +106,16 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
 - Admins can revoke individual vouches from a dropdown list and remove the posted vouch message from the configured channel.
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
+- After Roblox linking succeeds, the bot can sync the member nickname to `username (display name)` and assign the configured Roblox verified role in the primary guild.
+- Admins can inspect another member's linked Roblox account with `/checkroblox`, including live Roblox profile data and the systems owned by that Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
 - A persistent role-claim panel lets users self-assign the configured systems role when they qualify via admin-granted systems or matching Roblox gamepasses.
 - Incoming user DMs are forwarded to the configured owner for visibility.
 - The custom-order flow posts a button panel, collects a modal request, previews it to the user, and sends it to the owner DM with accept or reject buttons.
+- Admin-only web panels can create and edit reaction-based polls with custom emoji options, channel selection, stored IDs, and automatic close/result updates.
+- Admin-only web panels can create and edit giveaways with durations, winner counts, requirement text, stored IDs, and automatic winner selection when the timer expires.
+- Systems can be edited through an admin dropdown plus web editor, including metadata, file replacement, image replacement, PayPal link, and Roblox gamepass updates.
+- The AI assistant answers only in the configured support channel, uses admin-trained local knowledge entries, and pauses replies while `/trainbot` mode is active.
 
 ## Database Schema
 
@@ -119,6 +133,11 @@ SQLite schema lives in `sales_bot/sql/schema.sql` and creates these primary tabl
 - `transfer_locks`
 - `oauth_states`
 - `roblox_links`
+- `admin_panel_sessions`
+- `polls`
+- `giveaways`
+- `ai_knowledge_entries`
+- `ai_training_state`
 
 The database file path defaults to `data/bot.sqlite3` and is configurable through `SQLITE_PATH`.
 
@@ -137,12 +156,17 @@ Required values:
 
 Optional values:
 
+- `PRIMARY_GUILD_ID`
 - `ROBLOX_CLIENT_ID`
 - `ROBLOX_CLIENT_SECRET`
 - `ROBLOX_REDIRECT_URI`
 - `ROBLOX_ENTRY_LINK`
 - `ROBLOX_PRIVACY_POLICY_URL`
 - `ROBLOX_TERMS_URL`
+- `ROBLOX_VERIFIED_ROLE_ID`
+- `AI_SUPPORT_CHANNEL_ID`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
 - `PUBLIC_BASE_URL`
 - `WEB_HOST`
 - `WEB_PORT`
@@ -151,6 +175,7 @@ Optional values:
 - `LOG_LEVEL`
 - `SYNC_COMMANDS_ON_STARTUP`
 - `DEV_GUILD_ID`
+- `ADMIN_PANEL_SESSION_MINUTES`
 - `SELF_PING_ENABLED`
 - `SELF_PING_INTERVAL_SECONDS`
 

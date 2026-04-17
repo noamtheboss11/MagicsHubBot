@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from sales_bot.bot import SalesBot
+from sales_bot.checks import admin_only
 from sales_bot.exceptions import ConfigurationError, NotFoundError
 
 
@@ -72,6 +73,41 @@ class OAuthCog(commands.Cog):
             view.add_item(discord.ui.Button(label="פתח פרופיל Roblox", style=discord.ButtonStyle.link, url=record.profile_url))
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=interaction.guild is not None)
+
+    @app_commands.command(name="checkroblox", description="Admin lookup for a user's linked Roblox account and owned systems.")
+    @app_commands.describe(user="The Discord user whose linked Roblox account should be inspected.")
+    @admin_only()
+    async def checkroblox(self, interaction: discord.Interaction, user: discord.User) -> None:
+        if self.bot.http_session is None:
+            await interaction.response.send_message("The bot HTTP session is not ready yet. Try again in a moment.", ephemeral=True)
+            return
+
+        try:
+            record = await self.bot.services.oauth.get_link(user.id)
+        except NotFoundError:
+            await interaction.response.send_message("That user does not have a linked Roblox account.", ephemeral=True)
+            return
+
+        profile = await self.bot.services.oauth.fetch_public_profile(self.bot.http_session, record.roblox_sub)
+        owned_systems = await self.bot.services.ownership.list_user_systems(user.id)
+
+        embed = discord.Embed(title=f"Roblox Profile for {user}", color=discord.Color.blurple())
+        embed.add_field(name="Roblox User ID", value=str(profile.user_id), inline=True)
+        embed.add_field(name="Username", value=profile.username, inline=True)
+        embed.add_field(name="Display Name", value=profile.display_name, inline=True)
+        embed.add_field(name="Account Age", value=f"{profile.age_days} days" if profile.age_days is not None else "Unknown", inline=True)
+        embed.add_field(name="Linked At", value=record.linked_at, inline=True)
+        embed.add_field(name="Profile", value=profile.profile_url, inline=False)
+        embed.add_field(name="Description", value=profile.description or "No description.", inline=False)
+        embed.add_field(
+            name="Owned Systems",
+            value="\n".join(f"• {system.name}" for system in owned_systems) or "No owned systems.",
+            inline=False,
+        )
+        if profile.headshot_url:
+            embed.set_thumbnail(url=profile.headshot_url)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot: SalesBot) -> None:

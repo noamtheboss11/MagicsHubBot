@@ -14,12 +14,15 @@ from sales_bot.config import Settings
 from sales_bot.db import Database
 from sales_bot.exceptions import PermissionDeniedError, SalesBotError
 from sales_bot.services import ServiceContainer
+from sales_bot.services.ai_assistant import AIAssistantService
 from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
 from sales_bot.services.delivery import DeliveryService
+from sales_bot.services.engagement import GiveawayService, PollService
 from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
+from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
@@ -43,6 +46,8 @@ class SalesBot(commands.Bot):
         "sales_bot.cogs.vouches",
         "sales_bot.cogs.oauth",
         "sales_bot.cogs.support",
+        "sales_bot.cogs.engagement",
+        "sales_bot.cogs.ai_support",
     )
 
     def __init__(self, settings: Settings) -> None:
@@ -59,6 +64,7 @@ class SalesBot(commands.Bot):
         self.web_runner: web.AppRunner | None = None
         self.services: ServiceContainer
         self._command_sync_lock = asyncio.Lock()
+        self._maintenance_task: asyncio.Task[None] | None = None
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self) -> None:
@@ -74,6 +80,10 @@ class SalesBot(commands.Bot):
             payments=PaymentService(self.database),
             vouches=VouchService(self.database),
             oauth=RobloxOAuthService(self.database, self.settings),
+            panels=AdminPanelService(self.database, self.settings.admin_panel_session_minutes),
+            polls=PollService(self.database),
+            giveaways=GiveawayService(self.database),
+            ai_assistant=AIAssistantService(self.database, self.settings),
         )
 
 
@@ -82,9 +92,29 @@ class SalesBot(commands.Bot):
 
         await self._restore_persistent_views()
         await self._start_web_server()
+        self._maintenance_task = asyncio.create_task(self._maintenance_loop(), name="engagement-maintenance")
 
         if self.settings.sync_commands_on_startup:
             await self._sync_commands()
+
+    async def _maintenance_loop(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                finalized_polls = await self.services.polls.close_due_polls(self)
+                finalized_giveaways = await self.services.giveaways.close_due_giveaways(self)
+                if finalized_polls or finalized_giveaways:
+                    LOGGER.info(
+                        "Maintenance finalized %s polls and %s giveaways",
+                        finalized_polls,
+                        finalized_giveaways,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("Background maintenance loop failed")
+
+            await asyncio.sleep(30)
 
     async def _sync_commands(self) -> None:
         async with self._command_sync_lock:
@@ -136,6 +166,11 @@ class SalesBot(commands.Bot):
         )
 
     async def close(self) -> None:
+        if self._maintenance_task is not None:
+            self._maintenance_task.cancel()
+            await asyncio.gather(self._maintenance_task, return_exceptions=True)
+            self._maintenance_task = None
+
         if self.web_runner is not None:
             await self.web_runner.cleanup()
             self.web_runner = None

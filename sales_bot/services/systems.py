@@ -9,7 +9,7 @@ import discord
 from sales_bot.db import Database
 from sales_bot.exceptions import AlreadyExistsError, NotFoundError
 from sales_bot.models import SystemRecord
-from sales_bot.storage import remove_path, save_attachment, slugify
+from sales_bot.storage import remove_path, save_attachment, save_named_bytes, slugify
 
 
 class SystemService:
@@ -111,6 +111,77 @@ class SystemService:
         remove_path(system.file_path)
         remove_path(system.image_path)
         return system
+
+    async def update_system(
+        self,
+        system_id: int,
+        *,
+        name: str,
+        description: str,
+        paypal_link: str | None,
+        roblox_gamepass_reference: str | None,
+        file_upload: tuple[str, bytes] | None = None,
+        image_upload: tuple[str, bytes] | None = None,
+        clear_image: bool = False,
+    ) -> SystemRecord:
+        current = await self.get_system(system_id)
+        folder = Path(current.file_path).parent
+        next_file_path = current.file_path
+        next_image_path = current.image_path
+        new_file_path: Path | None = None
+        new_image_path: Path | None = None
+
+        if file_upload is not None:
+            filename, data = file_upload
+            new_file_path = save_named_bytes(filename, data, folder)
+            next_file_path = str(new_file_path)
+
+        if clear_image:
+            next_image_path = None
+
+        if image_upload is not None:
+            filename, data = image_upload
+            new_image_path = save_named_bytes(filename, data, folder)
+            next_image_path = str(new_image_path)
+
+        roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
+        cleaned_paypal_link = paypal_link.strip() if paypal_link else None
+
+        try:
+            await self.database.execute(
+                """
+                UPDATE systems
+                SET name = ?,
+                    description = ?,
+                    file_path = ?,
+                    image_path = ?,
+                    paypal_link = ?,
+                    roblox_gamepass_id = ?
+                WHERE id = ?
+                """,
+                (
+                    name.strip(),
+                    description.strip(),
+                    next_file_path,
+                    next_image_path,
+                    cleaned_paypal_link,
+                    roblox_gamepass_id,
+                    system_id,
+                ),
+            )
+        except aiosqlite.IntegrityError as exc:
+            remove_path(new_file_path)
+            remove_path(new_image_path)
+            raise AlreadyExistsError("A system with that name already exists.") from exc
+
+        if new_file_path is not None and current.file_path != str(new_file_path):
+            remove_path(current.file_path)
+        if clear_image and current.image_path:
+            remove_path(current.image_path)
+        if new_image_path is not None and current.image_path != str(new_image_path):
+            remove_path(current.image_path)
+
+        return await self.get_system(system_id)
 
     def build_embed(self, system: SystemRecord) -> discord.Embed:
         embed = discord.Embed(

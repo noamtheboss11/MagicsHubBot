@@ -1,0 +1,691 @@
+from __future__ import annotations
+
+import json
+import random
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, Sequence
+
+import aiosqlite
+import discord
+
+from sales_bot.db import Database
+from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
+from sales_bot.models import GiveawayRecord, PollOption, PollRecord
+
+if TYPE_CHECKING:
+    from sales_bot.bot import SalesBot
+
+
+DURATION_UNIT_ALIASES = {
+    "minute": "minutes",
+    "minutes": "minutes",
+    "hour": "hours",
+    "hours": "hours",
+    "day": "days",
+    "days": "days",
+    "week": "weeks",
+    "weeks": "weeks",
+}
+
+GIVEAWAY_ENTRY_EMOJI = "🎉"
+SYSTEM_RANDOM = random.SystemRandom()
+
+
+def _parse_datetime(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _normalize_duration(duration_value: int, duration_unit: str) -> tuple[int, str, datetime]:
+    if duration_value <= 0:
+        raise PermissionDeniedError("Duration must be greater than zero.")
+
+    normalized_unit = DURATION_UNIT_ALIASES.get(duration_unit.strip().lower())
+    if normalized_unit is None:
+        raise PermissionDeniedError("Duration unit must be minutes, hours, days, or weeks.")
+
+    delta = timedelta(**{normalized_unit: duration_value})
+    return duration_value, normalized_unit, datetime.now(UTC) + delta
+
+
+def _chunk_lines(lines: Sequence[str], *, max_size: int = 1000) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+
+    for line in lines:
+        additional_size = len(line) + (1 if current else 0)
+        if current and current_size + additional_size > max_size:
+            chunks.append("\n".join(current))
+            current = [line]
+            current_size = len(line)
+            continue
+
+        current.append(line)
+        current_size += additional_size
+
+    if current:
+        chunks.append("\n".join(current))
+
+    return chunks or ["No data available."]
+
+
+async def _resolve_text_channel(bot: "SalesBot", channel_id: int) -> discord.TextChannel:
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        channel = await bot.fetch_channel(channel_id)
+
+    if not isinstance(channel, discord.TextChannel):
+        raise ExternalServiceError("The selected channel must be a text channel the bot can post in.")
+    return channel
+
+
+class PollService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def create_poll(
+        self,
+        bot: "SalesBot",
+        *,
+        created_by: int,
+        channel_id: int,
+        question: str,
+        options: Sequence[PollOption],
+        duration_value: int,
+        duration_unit: str,
+    ) -> PollRecord:
+        normalized_options = self._normalize_options(options)
+        clean_question = self._normalize_question(question)
+        duration_value, duration_unit, ends_at = _normalize_duration(duration_value, duration_unit)
+        poll_id = await self.database.insert(
+            """
+            INSERT INTO polls (channel_id, question, options_json, duration_value, duration_unit, ends_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                channel_id,
+                clean_question,
+                json.dumps([option.__dict__ for option in normalized_options], ensure_ascii=False),
+                duration_value,
+                duration_unit,
+                ends_at,
+                created_by,
+            ),
+        )
+
+        try:
+            poll = await self.get_poll(poll_id)
+            message = await self._publish_poll_message(bot, poll)
+            await self.database.execute(
+                "UPDATE polls SET message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (message.id, poll_id),
+            )
+        except Exception:
+            await self.database.execute("DELETE FROM polls WHERE id = ?", (poll_id,))
+            raise
+
+        return await self.get_poll(poll_id)
+
+    async def update_poll(
+        self,
+        bot: "SalesBot",
+        poll_id: int,
+        *,
+        channel_id: int,
+        question: str,
+        options: Sequence[PollOption],
+        duration_value: int,
+        duration_unit: str,
+    ) -> PollRecord:
+        current = await self.get_poll(poll_id)
+        normalized_options = self._normalize_options(options)
+        clean_question = self._normalize_question(question)
+        duration_value, duration_unit, ends_at = _normalize_duration(duration_value, duration_unit)
+        preview_record = PollRecord(
+            id=current.id,
+            channel_id=channel_id,
+            message_id=current.message_id,
+            question=clean_question,
+            options=tuple(normalized_options),
+            duration_value=duration_value,
+            duration_unit=duration_unit,
+            ends_at=ends_at.isoformat(),
+            status="active",
+            result_json=None,
+            created_by=current.created_by,
+            created_at=current.created_at,
+            updated_at=current.updated_at,
+            closed_at=None,
+        )
+
+        message_id = current.message_id
+        if current.message_id is None or current.channel_id != channel_id:
+            new_message = await self._publish_poll_message(bot, preview_record)
+            message_id = new_message.id
+            await self._safe_delete_message(bot, current.channel_id, current.message_id)
+        else:
+            try:
+                existing_message = await self._fetch_message(bot, current.channel_id, current.message_id)
+                await existing_message.edit(embed=self.build_embed(preview_record))
+                await existing_message.clear_reactions()
+                for option in preview_record.options:
+                    await existing_message.add_reaction(option.emoji)
+                message_id = existing_message.id
+            except (discord.Forbidden, discord.HTTPException, NotFoundError):
+                new_message = await self._publish_poll_message(bot, preview_record)
+                message_id = new_message.id
+                await self._safe_delete_message(bot, current.channel_id, current.message_id)
+
+        await self.database.execute(
+            """
+            UPDATE polls
+            SET channel_id = ?,
+                message_id = ?,
+                question = ?,
+                options_json = ?,
+                duration_value = ?,
+                duration_unit = ?,
+                ends_at = ?,
+                status = 'active',
+                result_json = NULL,
+                updated_at = CURRENT_TIMESTAMP,
+                closed_at = NULL
+            WHERE id = ?
+            """,
+            (
+                channel_id,
+                message_id,
+                clean_question,
+                json.dumps([option.__dict__ for option in normalized_options], ensure_ascii=False),
+                duration_value,
+                duration_unit,
+                ends_at,
+                poll_id,
+            ),
+        )
+        return await self.get_poll(poll_id)
+
+    async def get_poll(self, poll_id: int) -> PollRecord:
+        row = await self.database.fetchone("SELECT * FROM polls WHERE id = ?", (poll_id,))
+        if row is None:
+            raise NotFoundError("Poll not found.")
+        return self._map_poll(row)
+
+    async def close_due_polls(self, bot: "SalesBot") -> int:
+        rows = await self.database.fetchall(
+            "SELECT * FROM polls WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at ASC",
+            (datetime.now(UTC),),
+        )
+        finalized = 0
+        for row in rows:
+            poll = self._map_poll(row)
+            result_payload = await self._build_result_payload(bot, poll)
+            await self.database.execute(
+                """
+                UPDATE polls
+                SET status = 'ended', result_json = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (json.dumps(result_payload, ensure_ascii=False), poll.id),
+            )
+            finalized_poll = await self.get_poll(poll.id)
+            try:
+                message = await self._fetch_message(bot, finalized_poll.channel_id, finalized_poll.message_id)
+                await message.edit(embed=self.build_embed(finalized_poll))
+            except (ExternalServiceError, NotFoundError, discord.HTTPException):
+                pass
+            finalized += 1
+        return finalized
+
+    def build_embed(self, poll: PollRecord) -> discord.Embed:
+        ends_at = _parse_datetime(poll.ends_at)
+        embed = discord.Embed(
+            title=f"Poll #{poll.id}",
+            description=poll.question,
+            color=discord.Color.blurple() if poll.status == "active" else discord.Color.dark_grey(),
+        )
+        embed.add_field(name="Status", value=poll.status.title(), inline=True)
+        embed.add_field(name="ID", value=str(poll.id), inline=True)
+        embed.add_field(name="Ends", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
+
+        option_lines = [f"{option.emoji} {option.label}" for option in poll.options]
+        for index, chunk in enumerate(_chunk_lines(option_lines), start=1):
+            field_name = "Options" if index == 1 else f"Options {index}"
+            embed.add_field(name=field_name, value=chunk, inline=False)
+
+        if poll.result_json:
+            results = json.loads(poll.result_json)
+            result_lines = [
+                f"{item['emoji']} {item['label']} - {item['votes']} vote(s)"
+                for item in results
+            ]
+            for index, chunk in enumerate(_chunk_lines(result_lines), start=1):
+                field_name = "Results" if index == 1 else f"Results {index}"
+                embed.add_field(name=field_name, value=chunk, inline=False)
+
+        embed.set_footer(text="Magic Studio's")
+        return embed
+
+    async def _publish_poll_message(self, bot: "SalesBot", poll: PollRecord) -> discord.Message:
+        channel = await _resolve_text_channel(bot, poll.channel_id)
+        message = await channel.send(embed=self.build_embed(poll))
+        try:
+            for option in poll.options:
+                await message.add_reaction(option.emoji)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+            raise ExternalServiceError("I couldn't add one or more of the selected poll emojis.") from exc
+        return message
+
+    async def _build_result_payload(self, bot: "SalesBot", poll: PollRecord) -> list[dict[str, Any]]:
+        try:
+            message = await self._fetch_message(bot, poll.channel_id, poll.message_id)
+        except (ExternalServiceError, NotFoundError):
+            return [
+                {"emoji": option.emoji, "label": option.label, "votes": 0}
+                for option in poll.options
+            ]
+
+        results: list[dict[str, Any]] = []
+        for option in poll.options:
+            matching_reaction = next(
+                (reaction for reaction in message.reactions if str(reaction.emoji) == option.emoji),
+                None,
+            )
+            vote_count = 0
+            if matching_reaction is not None:
+                vote_count = max(0, matching_reaction.count - (1 if matching_reaction.me else 0))
+            results.append({"emoji": option.emoji, "label": option.label, "votes": vote_count})
+        return results
+
+    async def _fetch_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> discord.Message:
+        if message_id is None:
+            raise NotFoundError("Poll message has not been published yet.")
+        channel = await _resolve_text_channel(bot, channel_id)
+        try:
+            return await channel.fetch_message(message_id)
+        except discord.NotFound as exc:
+            raise NotFoundError("Poll message not found.") from exc
+        except discord.HTTPException as exc:
+            raise ExternalServiceError("I couldn't fetch the poll message from Discord.") from exc
+
+    async def _safe_delete_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> None:
+        if message_id is None:
+            return
+        try:
+            message = await self._fetch_message(bot, channel_id, message_id)
+            await message.delete()
+        except (ExternalServiceError, NotFoundError, discord.HTTPException):
+            return
+
+    @staticmethod
+    def _normalize_question(question: str) -> str:
+        cleaned = question.strip()
+        if not cleaned:
+            raise PermissionDeniedError("Poll question cannot be empty.")
+        return cleaned
+
+    @staticmethod
+    def _normalize_options(options: Sequence[PollOption]) -> list[PollOption]:
+        normalized: list[PollOption] = []
+        seen_emojis: set[str] = set()
+        for option in options:
+            emoji = option.emoji.strip()
+            label = option.label.strip()
+            if not emoji and not label:
+                continue
+            if not emoji or not label:
+                raise PermissionDeniedError("Each poll option needs both text and an emoji.")
+            if emoji in seen_emojis:
+                raise PermissionDeniedError("Each poll option must use a unique emoji.")
+            seen_emojis.add(emoji)
+            normalized.append(PollOption(emoji=emoji, label=label))
+
+        if len(normalized) < 2:
+            raise PermissionDeniedError("Polls need at least two options.")
+        return normalized
+
+    @staticmethod
+    def _map_poll(row: aiosqlite.Row) -> PollRecord:
+        payload = json.loads(str(row["options_json"]))
+        return PollRecord(
+            id=int(row["id"]),
+            channel_id=int(row["channel_id"]),
+            message_id=int(row["message_id"]) if row["message_id"] is not None else None,
+            question=str(row["question"]),
+            options=tuple(PollOption(emoji=str(item["emoji"]), label=str(item["label"])) for item in payload),
+            duration_value=int(row["duration_value"]),
+            duration_unit=str(row["duration_unit"]),
+            ends_at=str(row["ends_at"]),
+            status=str(row["status"]),
+            result_json=str(row["result_json"]) if row["result_json"] else None,
+            created_by=int(row["created_by"]) if row["created_by"] is not None else None,
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+            closed_at=str(row["closed_at"]) if row["closed_at"] else None,
+        )
+
+
+class GiveawayService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    async def create_giveaway(
+        self,
+        bot: "SalesBot",
+        *,
+        created_by: int,
+        channel_id: int,
+        title: str,
+        description: str | None,
+        requirements: str | None,
+        winner_count: int,
+        duration_value: int,
+        duration_unit: str,
+    ) -> GiveawayRecord:
+        clean_title = self._normalize_title(title)
+        clean_description = self._normalize_optional_text(description)
+        clean_requirements = self._normalize_optional_text(requirements)
+        clean_winner_count = self._normalize_winner_count(winner_count)
+        duration_value, duration_unit, ends_at = _normalize_duration(duration_value, duration_unit)
+        giveaway_id = await self.database.insert(
+            """
+            INSERT INTO giveaways (
+                channel_id,
+                title,
+                description,
+                requirements,
+                winner_count,
+                duration_value,
+                duration_unit,
+                ends_at,
+                created_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                channel_id,
+                clean_title,
+                clean_description,
+                clean_requirements,
+                clean_winner_count,
+                duration_value,
+                duration_unit,
+                ends_at,
+                created_by,
+            ),
+        )
+
+        try:
+            giveaway = await self.get_giveaway(giveaway_id)
+            message = await self._publish_giveaway_message(bot, giveaway)
+            await self.database.execute(
+                "UPDATE giveaways SET message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (message.id, giveaway_id),
+            )
+        except Exception:
+            await self.database.execute("DELETE FROM giveaways WHERE id = ?", (giveaway_id,))
+            raise
+
+        return await self.get_giveaway(giveaway_id)
+
+    async def update_giveaway(
+        self,
+        bot: "SalesBot",
+        giveaway_id: int,
+        *,
+        channel_id: int,
+        title: str,
+        description: str | None,
+        requirements: str | None,
+        winner_count: int,
+        duration_value: int,
+        duration_unit: str,
+    ) -> GiveawayRecord:
+        current = await self.get_giveaway(giveaway_id)
+        clean_title = self._normalize_title(title)
+        clean_description = self._normalize_optional_text(description)
+        clean_requirements = self._normalize_optional_text(requirements)
+        clean_winner_count = self._normalize_winner_count(winner_count)
+        duration_value, duration_unit, ends_at = _normalize_duration(duration_value, duration_unit)
+        preview_record = GiveawayRecord(
+            id=current.id,
+            channel_id=channel_id,
+            message_id=current.message_id,
+            title=clean_title,
+            description=clean_description,
+            requirements=clean_requirements,
+            winner_count=clean_winner_count,
+            duration_value=duration_value,
+            duration_unit=duration_unit,
+            ends_at=ends_at.isoformat(),
+            status="active",
+            result_json=None,
+            created_by=current.created_by,
+            created_at=current.created_at,
+            updated_at=current.updated_at,
+            closed_at=None,
+        )
+
+        message_id = current.message_id
+        if current.message_id is None or current.channel_id != channel_id:
+            new_message = await self._publish_giveaway_message(bot, preview_record)
+            message_id = new_message.id
+            await self._safe_delete_message(bot, current.channel_id, current.message_id)
+        else:
+            try:
+                existing_message = await self._fetch_message(bot, current.channel_id, current.message_id)
+                await existing_message.edit(embed=self.build_embed(preview_record))
+                if not any(str(reaction.emoji) == GIVEAWAY_ENTRY_EMOJI for reaction in existing_message.reactions):
+                    await existing_message.add_reaction(GIVEAWAY_ENTRY_EMOJI)
+                message_id = existing_message.id
+            except (discord.Forbidden, discord.HTTPException, NotFoundError):
+                new_message = await self._publish_giveaway_message(bot, preview_record)
+                message_id = new_message.id
+                await self._safe_delete_message(bot, current.channel_id, current.message_id)
+
+        await self.database.execute(
+            """
+            UPDATE giveaways
+            SET channel_id = ?,
+                message_id = ?,
+                title = ?,
+                description = ?,
+                requirements = ?,
+                winner_count = ?,
+                duration_value = ?,
+                duration_unit = ?,
+                ends_at = ?,
+                status = 'active',
+                result_json = NULL,
+                updated_at = CURRENT_TIMESTAMP,
+                closed_at = NULL
+            WHERE id = ?
+            """,
+            (
+                channel_id,
+                message_id,
+                clean_title,
+                clean_description,
+                clean_requirements,
+                clean_winner_count,
+                duration_value,
+                duration_unit,
+                ends_at,
+                giveaway_id,
+            ),
+        )
+        return await self.get_giveaway(giveaway_id)
+
+    async def get_giveaway(self, giveaway_id: int) -> GiveawayRecord:
+        row = await self.database.fetchone("SELECT * FROM giveaways WHERE id = ?", (giveaway_id,))
+        if row is None:
+            raise NotFoundError("Giveaway not found.")
+        return self._map_giveaway(row)
+
+    async def close_due_giveaways(self, bot: "SalesBot") -> int:
+        rows = await self.database.fetchall(
+            "SELECT * FROM giveaways WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at ASC",
+            (datetime.now(UTC),),
+        )
+        finalized = 0
+        for row in rows:
+            giveaway = self._map_giveaway(row)
+            result_payload = await self._build_result_payload(bot, giveaway)
+            await self.database.execute(
+                """
+                UPDATE giveaways
+                SET status = 'ended', result_json = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (json.dumps(result_payload, ensure_ascii=False), giveaway.id),
+            )
+            finalized_giveaway = await self.get_giveaway(giveaway.id)
+            try:
+                message = await self._fetch_message(bot, finalized_giveaway.channel_id, finalized_giveaway.message_id)
+                await message.edit(embed=self.build_embed(finalized_giveaway))
+                if result_payload["winner_ids"]:
+                    winners = " ".join(f"<@{winner_id}>" for winner_id in result_payload["winner_ids"])
+                    await message.channel.send(
+                        f"🎉 Giveaway #{finalized_giveaway.id} has ended. Congratulations {winners}!"
+                    )
+                else:
+                    await message.channel.send(
+                        f"🎉 Giveaway #{finalized_giveaway.id} has ended with no valid entries."
+                    )
+            except (ExternalServiceError, NotFoundError, discord.HTTPException):
+                pass
+            finalized += 1
+        return finalized
+
+    def build_embed(self, giveaway: GiveawayRecord) -> discord.Embed:
+        ends_at = _parse_datetime(giveaway.ends_at)
+        embed = discord.Embed(
+            title=f"🎉 Giveaway #{giveaway.id}: {giveaway.title}",
+            description=giveaway.description or "React with 🎉 to enter.",
+            color=discord.Color.green() if giveaway.status == "active" else discord.Color.dark_grey(),
+        )
+        embed.add_field(name="Status", value=giveaway.status.title(), inline=True)
+        embed.add_field(name="ID", value=str(giveaway.id), inline=True)
+        embed.add_field(name="Winners", value=str(giveaway.winner_count), inline=True)
+        embed.add_field(name="Ends", value=f"<t:{int(ends_at.timestamp())}:F>\n<t:{int(ends_at.timestamp())}:R>", inline=False)
+        embed.add_field(name="How to Join", value=f"React with {GIVEAWAY_ENTRY_EMOJI}", inline=False)
+        embed.add_field(name="Requirements", value=giveaway.requirements or "No extra requirements.", inline=False)
+
+        if giveaway.result_json:
+            result_payload = json.loads(giveaway.result_json)
+            winners = result_payload.get("winner_ids", [])
+            entrant_count = int(result_payload.get("entrant_count", 0))
+            embed.add_field(name="Entrants", value=str(entrant_count), inline=True)
+            embed.add_field(
+                name="Winners Picked",
+                value=" ".join(f"<@{winner_id}>" for winner_id in winners) if winners else "No valid winners.",
+                inline=False,
+            )
+
+        embed.set_footer(text="Magic Studio's")
+        return embed
+
+    async def _publish_giveaway_message(self, bot: "SalesBot", giveaway: GiveawayRecord) -> discord.Message:
+        channel = await _resolve_text_channel(bot, giveaway.channel_id)
+        message = await channel.send(embed=self.build_embed(giveaway))
+        try:
+            await message.add_reaction(GIVEAWAY_ENTRY_EMOJI)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+            raise ExternalServiceError("I couldn't add the giveaway entry reaction.") from exc
+        return message
+
+    async def _build_result_payload(self, bot: "SalesBot", giveaway: GiveawayRecord) -> dict[str, Any]:
+        try:
+            message = await self._fetch_message(bot, giveaway.channel_id, giveaway.message_id)
+        except (ExternalServiceError, NotFoundError):
+            return {"winner_ids": [], "entrant_count": 0}
+
+        entrants: list[discord.abc.User] = []
+        for reaction in message.reactions:
+            if str(reaction.emoji) != GIVEAWAY_ENTRY_EMOJI:
+                continue
+            async for user in reaction.users(limit=None):
+                if user.bot:
+                    continue
+                entrants.append(user)
+            break
+
+        unique_entrants = list({entrant.id: entrant for entrant in entrants}.values())
+        winner_total = min(giveaway.winner_count, len(unique_entrants))
+        winner_ids = [winner.id for winner in SYSTEM_RANDOM.sample(unique_entrants, k=winner_total)] if winner_total else []
+        return {"winner_ids": winner_ids, "entrant_count": len(unique_entrants)}
+
+    async def _fetch_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> discord.Message:
+        if message_id is None:
+            raise NotFoundError("Giveaway message has not been published yet.")
+        channel = await _resolve_text_channel(bot, channel_id)
+        try:
+            return await channel.fetch_message(message_id)
+        except discord.NotFound as exc:
+            raise NotFoundError("Giveaway message not found.") from exc
+        except discord.HTTPException as exc:
+            raise ExternalServiceError("I couldn't fetch the giveaway message from Discord.") from exc
+
+    async def _safe_delete_message(self, bot: "SalesBot", channel_id: int, message_id: int | None) -> None:
+        if message_id is None:
+            return
+        try:
+            message = await self._fetch_message(bot, channel_id, message_id)
+            await message.delete()
+        except (ExternalServiceError, NotFoundError, discord.HTTPException):
+            return
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        cleaned = title.strip()
+        if not cleaned:
+            raise PermissionDeniedError("Giveaway title cannot be empty.")
+        return cleaned
+
+    @staticmethod
+    def _normalize_optional_text(value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @staticmethod
+    def _normalize_winner_count(winner_count: int) -> int:
+        if winner_count <= 0:
+            raise PermissionDeniedError("Giveaway winner count must be greater than zero.")
+        return winner_count
+
+    @staticmethod
+    def _map_giveaway(row: aiosqlite.Row) -> GiveawayRecord:
+        return GiveawayRecord(
+            id=int(row["id"]),
+            channel_id=int(row["channel_id"]),
+            message_id=int(row["message_id"]) if row["message_id"] is not None else None,
+            title=str(row["title"]),
+            description=str(row["description"]) if row["description"] else None,
+            requirements=str(row["requirements"]) if row["requirements"] else None,
+            winner_count=int(row["winner_count"]),
+            duration_value=int(row["duration_value"]),
+            duration_unit=str(row["duration_unit"]),
+            ends_at=str(row["ends_at"]),
+            status=str(row["status"]),
+            result_json=str(row["result_json"]) if row["result_json"] else None,
+            created_by=int(row["created_by"]) if row["created_by"] is not None else None,
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+            closed_at=str(row["closed_at"]) if row["closed_at"] else None,
+        )

@@ -124,6 +124,72 @@ CREATE TABLE IF NOT EXISTS order_requests (
     reviewed_by BIGINT
 );
 
+CREATE TABLE IF NOT EXISTS admin_panel_sessions (
+    token TEXT PRIMARY KEY,
+    admin_user_id BIGINT NOT NULL,
+    panel_type TEXT NOT NULL,
+    target_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS polls (
+    id BIGSERIAL PRIMARY KEY,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT,
+    question TEXT NOT NULL,
+    options_json TEXT NOT NULL,
+    duration_value INTEGER NOT NULL,
+    duration_unit TEXT NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    result_json TEXT,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS giveaways (
+    id BIGSERIAL PRIMARY KEY,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT,
+    title TEXT NOT NULL,
+    description TEXT,
+    requirements TEXT,
+    winner_count INTEGER NOT NULL,
+    duration_value INTEGER NOT NULL,
+    duration_unit TEXT NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    result_json TEXT,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS ai_knowledge_entries (
+    id BIGSERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    created_by BIGINT,
+    source_channel_id BIGINT,
+    source_message_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ai_training_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    started_by BIGINT,
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ
+);
+
+INSERT INTO ai_training_state (id, is_active)
+VALUES (1, FALSE)
+ON CONFLICT (id) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_systems_name ON systems(name);
 CREATE INDEX IF NOT EXISTS idx_user_systems_user ON user_systems(user_id);
 CREATE INDEX IF NOT EXISTS idx_blacklist_appeals_status ON blacklist_appeals(status);
@@ -132,3 +198,7 @@ CREATE INDEX IF NOT EXISTS idx_vouches_admin_user ON vouches(admin_user_id);
 CREATE INDEX IF NOT EXISTS idx_order_requests_status ON order_requests(status);
 CREATE INDEX IF NOT EXISTS idx_temp_saved_systems_user ON temp_saved_systems(user_id);
 CREATE INDEX IF NOT EXISTS idx_transfer_locks_user ON transfer_locks(user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_panel_sessions_panel ON admin_panel_sessions(panel_type, expires_at);
+CREATE INDEX IF NOT EXISTS idx_polls_status ON polls(status, ends_at);
+CREATE INDEX IF NOT EXISTS idx_giveaways_status ON giveaways(status, ends_at);
+CREATE INDEX IF NOT EXISTS idx_ai_knowledge_entries_created ON ai_knowledge_entries(created_at);

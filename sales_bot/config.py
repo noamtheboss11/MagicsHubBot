@@ -55,14 +55,19 @@ class Settings:
     discord_client_id: int
     discord_client_secret: str
     owner_user_id: int
+    primary_guild_id: int | None
     vouch_channel_id: int
     order_channel_id: int
+    roblox_verified_role_id: int
+    ai_support_channel_id: int
     roblox_client_id: str | None
     roblox_client_secret: str | None
     roblox_redirect_uri: str | None
     roblox_entry_link: str | None
     roblox_privacy_policy_url: str | None
     roblox_terms_url: str | None
+    gemini_api_key: str | None
+    gemini_model: str
     public_base_url: str
     paypal_webhook_token: str
     web_host: str
@@ -75,6 +80,7 @@ class Settings:
     dev_guild_id: int | None
     self_ping_enabled: bool
     self_ping_interval_seconds: int
+    admin_panel_session_minutes: int
 
     @property
     def roblox_oauth_enabled(self) -> bool:
@@ -109,14 +115,19 @@ class Settings:
             discord_client_id=int(_require_env("DISCORD_CLIENT_ID")),
             discord_client_secret=_require_env("DISCORD_CLIENT_SECRET"),
             owner_user_id=int(os.getenv("OWNER_USER_ID", "1204103872348557372")),
+            primary_guild_id=_optional_int("PRIMARY_GUILD_ID") or _optional_int("DEV_GUILD_ID"),
             vouch_channel_id=int(os.getenv("VOUCH_CHANNEL_ID", "1492468162372046908")),
             order_channel_id=int(os.getenv("ORDER_CHANNEL_ID", "1492472669059285012")),
+            roblox_verified_role_id=int(os.getenv("ROBLOX_VERIFIED_ROLE_ID", "1494685982161768669")),
+            ai_support_channel_id=int(os.getenv("AI_SUPPORT_CHANNEL_ID", "1494689678975172710")),
             roblox_client_id=_optional_env("ROBLOX_CLIENT_ID"),
             roblox_client_secret=_optional_env("ROBLOX_CLIENT_SECRET"),
             roblox_redirect_uri=roblox_redirect_uri,
             roblox_entry_link=roblox_entry_link,
             roblox_privacy_policy_url=roblox_privacy_policy_url,
             roblox_terms_url=roblox_terms_url,
+            gemini_api_key=_optional_env("GEMINI_API_KEY"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
             public_base_url=public_base_url,
             paypal_webhook_token=_require_env("PAYPAL_WEBHOOK_TOKEN"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
@@ -129,6 +140,7 @@ class Settings:
             dev_guild_id=_optional_int("DEV_GUILD_ID"),
             self_ping_enabled=_optional_bool("SELF_PING_ENABLED", True),
             self_ping_interval_seconds=int(os.getenv("SELF_PING_INTERVAL_SECONDS", "180")),
+            admin_panel_session_minutes=int(os.getenv("ADMIN_PANEL_SESSION_MINUTES", "120")),
         )
 
         if not settings.database_url:

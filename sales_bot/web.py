@@ -7,6 +7,13 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 
 from sales_bot.exceptions import ExternalServiceError, NotFoundError
+from sales_bot.web_admin import (
+    giveaway_create_page,
+    giveaway_edit_page,
+    poll_create_page,
+    poll_edit_page,
+    system_edit_page,
+)
 
 if TYPE_CHECKING:
     from sales_bot.bot import SalesBot
@@ -24,6 +31,11 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/health", healthcheck)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
+    app.router.add_route("*", "/admin/polls/new", poll_create_page)
+    app.router.add_route("*", "/admin/polls/{poll_id:\\d+}/edit", poll_edit_page)
+    app.router.add_route("*", "/admin/giveaways/new", giveaway_create_page)
+    app.router.add_route("*", "/admin/giveaways/{giveaway_id:\\d+}/edit", giveaway_edit_page)
+    app.router.add_route("*", "/admin/systems/{system_id:\\d+}/edit", system_edit_page)
     return app
 
 
@@ -153,10 +165,14 @@ async def roblox_callback(request: web.Request) -> web.Response:
         tokens = await bot.services.oauth.exchange_code(bot.http_session, code)
         profile = await bot.services.oauth.fetch_profile(bot.http_session, tokens["access_token"])
         record = await bot.services.oauth.link_account(user_id, profile)
+        sync_notes = await bot.services.oauth.sync_linked_member(bot, user_id, record)
 
         user = await bot.fetch_user(user_id)
+        success_message = f"חשבון הרובלוקס שלך קושר בהצלחה בתור **{record.roblox_username or record.roblox_sub}**."
+        if sync_notes:
+            success_message += "\n\n" + "\n".join(f"- {note}" for note in sync_notes)
         await user.send(
-            f"חשבון הרובלוקס שלך קושר בהצלחה בתור **{record.roblox_username or record.roblox_sub}**."
+            success_message
         )
     except (NotFoundError, ExternalServiceError) as exc:
         LOGGER.warning("Roblox OAuth callback failed: %s", exc)

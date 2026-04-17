@@ -103,6 +103,18 @@ class RobloxLinkRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class RobloxPublicProfile:
+    user_id: int
+    username: str
+    display_name: str
+    description: str
+    created_at: str | None
+    age_days: int | None
+    headshot_url: str | None
+    profile_url: str
+
+
+@dataclass(slots=True, frozen=True)
 class OrderRequestRecord:
     id: int
     user_id: int
@@ -115,3 +127,75 @@ class OrderRequestRecord:
     submitted_at: str
     reviewed_at: str | None
     reviewed_by: int | None
+
+
+@dataclass(slots=True, frozen=True)
+class AdminPanelSessionRecord:
+    token: str
+    admin_user_id: int
+    panel_type: str
+    target_id: int | None
+    expires_at: str
+    created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class PollOption:
+    emoji: str
+    label: str
+
+
+@dataclass(slots=True, frozen=True)
+class PollRecord:
+    id: int
+    channel_id: int
+    message_id: int | None
+    question: str
+    options: tuple[PollOption, ...]
+    duration_value: int
+    duration_unit: str
+    ends_at: str
+    status: str
+    result_json: str | None
+    created_by: int | None
+    created_at: str
+    updated_at: str
+    closed_at: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class GiveawayRecord:
+    id: int
+    channel_id: int
+    message_id: int | None
+    title: str
+    description: str | None
+    requirements: str | None
+    winner_count: int
+    duration_value: int
+    duration_unit: str
+    ends_at: str
+    status: str
+    result_json: str | None
+    created_by: int | None
+    created_at: str
+    updated_at: str
+    closed_at: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class AIKnowledgeRecord:
+    id: int
+    content: str
+    created_by: int | None
+    source_channel_id: int | None
+    source_message_id: int | None
+    created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class AITrainingStateRecord:
+    is_active: bool
+    started_by: int | None
+    started_at: str | None
+    ended_at: str | None
