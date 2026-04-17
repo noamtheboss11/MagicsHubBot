@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, cast
 
 from discord import app_commands
 
+from sales_bot.exceptions import NotFoundError
+
 if TYPE_CHECKING:
     import discord
 
@@ -36,8 +38,10 @@ def linked_roblox_required() -> app_commands.Check:
 
         try:
             await sales_bot.services.oauth.get_link(interaction.user.id)
-        except Exception:
-            raise app_commands.CheckFailure("כדי להשתמש בפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `/link`.")
+        except NotFoundError as exc:
+            raise app_commands.CheckFailure(
+                "כדי להשתמש בפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `/link`."
+            ) from exc
 
         return True
 

@@ -179,7 +179,35 @@ class SalesBot(commands.Bot):
                 pass
             return
 
-        LOGGER.exception("Application command error", exc_info=(type(original_error), original_error, original_error.__traceback__))
+        command_name = interaction.command.qualified_name if interaction.command else "unknown"
+        user_id = interaction.user.id if interaction.user else "unknown"
+
+        if isinstance(error, app_commands.CheckFailure):
+            LOGGER.info(
+                "Application command blocked for %s by user %s: %s",
+                command_name,
+                user_id,
+                error,
+            )
+        elif isinstance(error, app_commands.CommandOnCooldown):
+            LOGGER.info(
+                "Application command on cooldown for %s by user %s: retry after %.1fs",
+                command_name,
+                user_id,
+                error.retry_after,
+            )
+        elif isinstance(original_error, SalesBotError):
+            LOGGER.warning(
+                "Application command failed for %s by user %s: %s",
+                command_name,
+                user_id,
+                original_error,
+            )
+        else:
+            LOGGER.exception(
+                "Application command error",
+                exc_info=(type(original_error), original_error, original_error.__traceback__),
+            )
 
         if isinstance(original_error, PermissionDeniedError):
             message = str(original_error)

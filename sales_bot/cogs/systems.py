@@ -64,6 +64,13 @@ class SystemsCog(commands.Cog):
             await interaction.response.send_message("The optional image attachment must be an image file.", ephemeral=True)
             return
 
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.defer(ephemeral=True)
+            except discord.HTTPException as exc:
+                if exc.code != 40060:
+                    raise
+
         system = await self.bot.services.systems.create_system(
             name=name,
             description=description,
@@ -73,7 +80,9 @@ class SystemsCog(commands.Cog):
             paypal_link=paypal_link,
             roblox_gamepass_reference=roblox_gamepass,
         )
-        await interaction.response.send_message(
+
+        responder = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
+        await responder(
             "System stored successfully.",
             embed=self.bot.services.systems.build_embed(system),
             ephemeral=True,
