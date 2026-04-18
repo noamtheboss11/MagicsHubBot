@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,6 +9,9 @@ from discord.ext import commands
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
 from sales_bot.exceptions import ExternalServiceError
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AISupportCog(commands.Cog):
@@ -45,17 +50,57 @@ class AISupportCog(commands.Cog):
         training_state = await self.bot.services.ai_assistant.get_training_state()
         if training_state.is_active:
             if author_is_admin:
-                record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
-                if record is not None:
+                try:
+                    record = await self.bot.services.ai_assistant.add_training_message(message, self.bot.http_session)
+                    if record is None:
+                        return
                     training_reply = self.bot.services.ai_assistant.build_training_acknowledgement(record)
+                except ExternalServiceError as exc:
+                    LOGGER.warning(
+                        "Failed to store AI training message %s in channel %s: %s",
+                        message.id,
+                        message.channel.id,
+                        exc,
+                    )
                     try:
-                        await message.add_reaction("💾")
+                        await message.reply(
+                            f"I couldn't save that training entry right now: {exc}",
+                            mention_author=False,
+                        )
                     except discord.HTTPException:
                         pass
+                    return
+                except Exception:
+                    LOGGER.exception(
+                        "Unexpected failure while storing AI training message %s in channel %s",
+                        message.id,
+                        message.channel.id,
+                    )
                     try:
-                        await message.reply(training_reply, mention_author=False)
+                        await message.reply(
+                            "I couldn't save that training entry because of an internal error.",
+                            mention_author=False,
+                        )
                     except discord.HTTPException:
                         pass
+                    return
+
+                try:
+                    await message.add_reaction("💾")
+                except discord.HTTPException:
+                    pass
+
+                try:
+                    await message.reply(training_reply, mention_author=False)
+                except discord.HTTPException:
+                    try:
+                        await message.channel.send(training_reply)
+                    except discord.HTTPException:
+                        LOGGER.warning(
+                            "Failed to send AI training acknowledgement for message %s in channel %s",
+                            message.id,
+                            message.channel.id,
+                        )
             else:
                 try:
                     await message.reply(

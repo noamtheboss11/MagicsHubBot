@@ -193,7 +193,7 @@ class SalesBot(commands.Bot):
         original_error = getattr(error, "original", error)
 
         if isinstance(original_error, discord.NotFound) and original_error.code == 10062:
-            LOGGER.warning("Skipping expired interaction error handling for command response race")
+            LOGGER.info("Ignoring expired interaction error handling after command response race")
             return
 
         if isinstance(original_error, discord.HTTPException) and original_error.code == 40060:
