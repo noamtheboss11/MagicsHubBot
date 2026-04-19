@@ -85,6 +85,12 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/vouches`
 - `/revokevouch`
 - `/link`
+- `/linkasowner`
+- `/ownergamepasses`
+- `/creategamepass`
+- `/configuregamepass`
+- `/connectgamepass`
+- `/sendgamepass`
 - `/checkroblox`
 - `/poll`
 - `/editpoll`
@@ -97,6 +103,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 
 - Admins are stored in SQLite, with the configured owner always treated as a permanent admin.
 - Systems store metadata plus uploaded files on disk under `data/systems/`.
+- Systems also persist uploaded asset bytes in the database so deliveries can still work after Render deploys or other ephemeral filesystem resets.
 - Systems can optionally store a Roblox gamepass ID or full link for Robux purchases.
 - System deliveries go through DMs, send embeds plus attached files, and are logged so blacklist and revoke actions can delete prior bot-sent system messages.
 - Blacklist appeals use a modal and a persistent owner-DM button view that survives bot restarts.
@@ -106,9 +113,11 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
 - Admins can revoke individual vouches from a dropdown list and remove the posted vouch message from the configured channel.
 - Roblox OAuth uses an aiohttp callback server and stores linked Roblox profile data per Discord user.
+- The server owner can separately link Roblox creator access with `/linkasowner`, then list, create, update, connect, and publish Roblox game passes for the configured universe.
 - After Roblox linking succeeds, the bot can sync the member nickname to `username (display name)` and assign the configured Roblox verified role in the primary guild.
 - Admins can inspect another member's linked Roblox account with `/checkroblox`, including live Roblox profile data and the systems owned by that Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
+- A Roblox game pass webhook endpoint can auto-grant a linked user's system as soon as your Roblox experience reports the purchase.
 - A persistent role-claim panel lets users self-assign the configured systems role when they qualify via admin-granted systems or matching Roblox gamepasses.
 - Incoming user DMs are forwarded to the configured owner for visibility.
 - The custom-order flow posts a button panel, collects a modal request, previews it to the user, and sends it to the owner DM with accept or reject buttons.
@@ -163,6 +172,11 @@ Optional values:
 - `ROBLOX_ENTRY_LINK`
 - `ROBLOX_PRIVACY_POLICY_URL`
 - `ROBLOX_TERMS_URL`
+- `ROBLOX_OWNER_CLIENT_ID`
+- `ROBLOX_OWNER_CLIENT_SECRET`
+- `ROBLOX_OWNER_REDIRECT_URI`
+- `ROBLOX_OWNER_UNIVERSE_ID`
+- `ROBLOX_GAMEPASS_WEBHOOK_TOKEN`
 - `ROBLOX_VERIFIED_ROLE_ID`
 - `AI_SUPPORT_CHANNEL_ID`
 - `AI_TRAINING_CHANNEL_ID`
@@ -182,6 +196,8 @@ Optional values:
 
 If the Roblox OAuth variables are omitted, the bot still starts normally and the `/link` flow stays unavailable until those values are configured.
 
+If the Roblox owner OAuth variables are omitted, the bot still starts normally and the owner-only game pass commands stay unavailable until those values are configured.
+
 If `AI_TRAINING_CHANNEL_ID` is omitted, `/trainbot` keeps using `AI_SUPPORT_CHANNEL_ID` as the training location.
 
 ## Render
@@ -192,6 +208,17 @@ Render Web Service settings:
 - Start command: `python main.py`
 
 The app now falls back to Render's `PORT` environment variable automatically, so `WEB_PORT=$PORT` is no longer required in the start command.
+
+If you run with Postgres on Render, newly added or updated systems now keep a database-backed copy of their files. That protects DM deliveries after a deploy even if the temporary filesystem is wiped.
+
+If you want the server owner to manage Roblox game passes from Discord on Render, also set these environment variables there:
+
+- `PUBLIC_BASE_URL=https://<your-render-domain>`
+- `ROBLOX_OWNER_CLIENT_ID=<your Roblox owner OAuth client id>`
+- `ROBLOX_OWNER_CLIENT_SECRET=<your Roblox owner OAuth client secret>`
+- `ROBLOX_OWNER_REDIRECT_URI=https://<your-render-domain>/oauth/roblox/owner/callback`
+- `ROBLOX_OWNER_UNIVERSE_ID=<your Roblox universe id>`
+- `ROBLOX_GAMEPASS_WEBHOOK_TOKEN=<a long random secret used by your Roblox game webhook>`
 
 The bot also supports a background self-ping loop using `PUBLIC_BASE_URL`. By default it pings `/health` every 180 seconds. You can control that with:
 
@@ -241,6 +268,35 @@ Invoke-RestMethod \
 ```
 
 Once the webhook is accepted, the purchased system is delivered automatically by DM.
+
+## Roblox Game Pass Webhook
+
+After you connect the server owner with `/linkasowner`, connect a Roblox game pass to a system with `/connectgamepass`, and send the buy button with `/sendgamepass`, your Roblox experience can notify the bot when the purchase happens.
+
+Roblox does not send this webhook for you automatically. You need a server script inside the Roblox experience that calls the endpoint. A sample script is included in `GamePassWebhook.server.lua` in this repo.
+
+Endpoint:
+
+- `POST /webhooks/roblox/gamepass`
+- Header: `X-Roblox-Webhook-Token: <ROBLOX_GAMEPASS_WEBHOOK_TOKEN>`
+
+Example JSON payload:
+
+```json
+{
+  "roblox_user_id": 123456789,
+  "gamepass_id": 987654321
+}
+```
+
+The sample server script does two things:
+
+- It sends the webhook immediately after an in-game `PromptGamePassPurchaseFinished` purchase.
+- It also re-checks configured game pass ownership for online players so purchases made from a Discord or website link can still be detected while the player is in the experience or when they join later.
+
+Before using it, make sure `HttpService` is enabled in your Roblox experience settings and replace the placeholder values at the top of the Lua file.
+
+If the buyer already linked their Roblox account in Discord with `/link`, the bot grants the linked system automatically. If the buyer has not linked yet, the endpoint returns an accepted-but-unlinked response, and the user can still link later and use `/getsystem` to claim the system from their owned game pass.
 
 ## Validation Performed
 

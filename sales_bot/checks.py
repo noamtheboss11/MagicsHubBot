@@ -46,3 +46,16 @@ def linked_roblox_required() -> app_commands.Check:
         return True
 
     return app_commands.check(predicate)
+
+
+def guild_owner_only() -> app_commands.Check:
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            raise app_commands.CheckFailure("This command can only be used inside a server.")
+
+        if interaction.guild.owner_id != interaction.user.id:
+            raise app_commands.CheckFailure("Only the server owner can use this command.")
+
+        return True
+
+    return app_commands.check(predicate)

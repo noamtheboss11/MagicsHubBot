@@ -17,6 +17,15 @@ class SystemRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class SystemAssetRecord:
+    system_id: int
+    asset_type: str
+    asset_name: str
+    asset_bytes: bytes
+    updated_at: str
+
+
+@dataclass(slots=True, frozen=True)
 class OwnedSystemRecord:
     system: SystemRecord
     source: str
@@ -112,6 +121,32 @@ class RobloxPublicProfile:
     age_days: int | None
     headshot_url: str | None
     profile_url: str
+
+
+@dataclass(slots=True, frozen=True)
+class RobloxOwnerLinkRecord:
+    guild_id: int
+    discord_user_id: int
+    roblox_sub: str
+    roblox_username: str | None
+    roblox_display_name: str | None
+    profile_url: str | None
+    token_type: str
+    scope: str
+    token_expires_at: str
+    linked_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class RobloxGamePassRecord:
+    game_pass_id: int
+    name: str
+    description: str
+    is_for_sale: bool
+    icon_asset_id: int | None
+    price_in_robux: int | None
+    created_at: str
+    updated_at: str
 
 
 @dataclass(slots=True, frozen=True)

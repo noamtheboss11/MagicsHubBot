@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS systems (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS system_assets (
+    system_id BIGINT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
+    asset_type TEXT NOT NULL CHECK (asset_type IN ('file', 'image')),
+    asset_name TEXT NOT NULL,
+    asset_bytes BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (system_id, asset_type)
+);
+
 CREATE TABLE IF NOT EXISTS user_systems (
     user_id BIGINT NOT NULL,
     system_id BIGINT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
@@ -110,6 +119,31 @@ CREATE TABLE IF NOT EXISTS roblox_links (
     linked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS roblox_owner_states (
+    state TEXT PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS roblox_owner_links (
+    guild_id BIGINT PRIMARY KEY,
+    discord_user_id BIGINT NOT NULL,
+    roblox_sub TEXT NOT NULL,
+    roblox_username TEXT,
+    roblox_display_name TEXT,
+    profile_url TEXT,
+    raw_profile_json TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_type TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    token_expires_at TEXT NOT NULL,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS order_requests (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -202,3 +236,5 @@ CREATE INDEX IF NOT EXISTS idx_admin_panel_sessions_panel ON admin_panel_session
 CREATE INDEX IF NOT EXISTS idx_polls_status ON polls(status, ends_at);
 CREATE INDEX IF NOT EXISTS idx_giveaways_status ON giveaways(status, ends_at);
 CREATE INDEX IF NOT EXISTS idx_ai_knowledge_entries_created ON ai_knowledge_entries(created_at);
+CREATE INDEX IF NOT EXISTS idx_roblox_links_sub ON roblox_links(roblox_sub);
+CREATE INDEX IF NOT EXISTS idx_roblox_owner_states_expires ON roblox_owner_states(expires_at);

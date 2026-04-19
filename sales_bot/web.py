@@ -30,7 +30,9 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/terms", terms_page)
     app.router.add_get("/health", healthcheck)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
+    app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
     app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
+    app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_route("*", "/admin/polls/new", poll_create_page)
     app.router.add_route("*", "/admin/polls/{poll_id:\\d+}/edit", poll_edit_page)
     app.router.add_route("*", "/admin/giveaways/new", giveaway_create_page)
@@ -187,6 +189,41 @@ async def roblox_callback(request: web.Request) -> web.Response:
     )
 
 
+async def roblox_owner_callback(request: web.Request) -> web.Response:
+    bot: SalesBot = request.app["bot"]
+    if not bot.settings.roblox_owner_oauth_enabled:
+        return web.Response(text="Roblox owner OAuth is not configured for this deployment.", status=503)
+
+    state = request.query.get("state", "")
+    code = request.query.get("code", "")
+
+    if not state or not code:
+        return web.Response(text="Missing state or code.", status=400)
+
+    try:
+        guild_id, discord_user_id = await bot.services.roblox_creator.consume_state(state)
+        tokens = await bot.services.roblox_creator.exchange_code(bot.http_session, code)
+        profile = await bot.services.roblox_creator.fetch_profile(bot.http_session, tokens["access_token"])
+        record = await bot.services.roblox_creator.link_owner(guild_id, discord_user_id, profile, tokens)
+
+        user = await bot.fetch_user(discord_user_id)
+        await user.send(
+            "Roblox owner access is now linked for your server. "
+            f"Connected account: **{record.roblox_username or record.roblox_sub}**."
+        )
+    except (NotFoundError, ExternalServiceError) as exc:
+        LOGGER.warning("Roblox owner OAuth callback failed: %s", exc)
+        return web.Response(text=f"Owner linking failed: {exc}", status=400)
+    except Exception:
+        LOGGER.exception("Unexpected Roblox owner OAuth callback failure")
+        return web.Response(text="An unexpected owner OAuth error occurred.", status=500)
+
+    return web.Response(
+        text="Roblox owner access linked successfully. You can return to Discord.",
+        content_type="text/plain",
+    )
+
+
 async def paypal_webhook(request: web.Request) -> web.Response:
     bot: SalesBot = request.app["bot"]
     provided_token = request.headers.get("X-Webhook-Token", "")
@@ -209,3 +246,96 @@ async def paypal_webhook(request: web.Request) -> web.Response:
         return web.json_response({"error": "internal error"}, status=500)
 
     return web.json_response({"status": "completed", "purchase_id": purchase_id})
+
+
+async def roblox_gamepass_webhook(request: web.Request) -> web.Response:
+    bot: SalesBot = request.app["bot"]
+    expected_token = bot.settings.roblox_gamepass_webhook_token or ""
+    provided_token = request.headers.get("X-Roblox-Webhook-Token", "") or request.headers.get("X-Webhook-Token", "")
+    if not expected_token:
+        return web.json_response({"error": "webhook not configured"}, status=503)
+    if provided_token != expected_token:
+        return web.json_response({"error": "unauthorized"}, status=401)
+
+    payload: dict[str, Any] = await request.json()
+    roblox_user_id = str(
+        payload.get("roblox_user_id")
+        or payload.get("robloxUserId")
+        or payload.get("player_user_id")
+        or payload.get("playerUserId")
+        or payload.get("user_id")
+        or payload.get("userId")
+        or ""
+    ).strip()
+    gamepass_id = str(
+        payload.get("gamepass_id")
+        or payload.get("gamePassId")
+        or payload.get("pass_id")
+        or payload.get("passId")
+        or payload.get("purchased_gamepass_id")
+        or payload.get("purchasedGamePassId")
+        or ""
+    ).strip()
+
+    if not roblox_user_id.isdigit() or not gamepass_id.isdigit():
+        return web.json_response({"error": "invalid payload"}, status=400)
+
+    try:
+        system = await bot.services.systems.get_system_by_gamepass_id(gamepass_id)
+    except NotFoundError as exc:
+        return web.json_response({"error": str(exc)}, status=404)
+
+    try:
+        link = await bot.services.oauth.get_link_by_roblox_sub(roblox_user_id)
+    except NotFoundError:
+        return web.json_response(
+            {
+                "status": "accepted_unlinked",
+                "message": "Purchase accepted, but no linked Discord user was found for this Roblox account yet.",
+                "gamepass_id": gamepass_id,
+            },
+            status=202,
+        )
+    except ExternalServiceError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+
+    already_owned = await bot.services.ownership.user_owns_system(link.user_id, system.id)
+    if already_owned:
+        return web.json_response(
+            {
+                "status": "already_owned",
+                "discord_user_id": link.user_id,
+                "system_id": system.id,
+                "gamepass_id": gamepass_id,
+            }
+        )
+
+    try:
+        user = await bot.fetch_user(link.user_id)
+        await bot.services.delivery.deliver_system(
+            bot,
+            user,
+            system,
+            source=bot.services.ownership.ROBLOX_CLAIM_SOURCE,
+            granted_by=None,
+        )
+        status = "delivered"
+    except ExternalServiceError as exc:
+        LOGGER.warning("Roblox webhook delivery DM failed for user %s: %s", link.user_id, exc)
+        await bot.services.ownership.grant_system(
+            link.user_id,
+            system.id,
+            None,
+            bot.services.ownership.ROBLOX_CLAIM_SOURCE,
+        )
+        await bot.services.ownership.refresh_claim_role_membership(bot, link.user_id, sync_ownerships=False)
+        status = "owned_no_dm"
+
+    return web.json_response(
+        {
+            "status": status,
+            "discord_user_id": link.user_id,
+            "system_id": system.id,
+            "gamepass_id": gamepass_id,
+        }
+    )

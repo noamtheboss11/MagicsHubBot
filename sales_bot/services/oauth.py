@@ -13,7 +13,7 @@ import discord
 
 from sales_bot.config import Settings
 from sales_bot.db import Database
-from sales_bot.exceptions import ConfigurationError, ExternalServiceError, NotFoundError
+from sales_bot.exceptions import ConfigurationError, ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.models import RobloxLinkRecord, RobloxPublicProfile
 
 if TYPE_CHECKING:
@@ -119,6 +119,13 @@ class RobloxOAuthService:
         display_name = profile.get("name")
         profile_url = f"https://www.roblox.com/users/{roblox_sub}/profile" if roblox_sub.isdigit() else None
 
+        existing_rows = await self.database.fetchall(
+            "SELECT user_id FROM roblox_links WHERE roblox_sub = ? AND user_id != ?",
+            (roblox_sub, user_id),
+        )
+        if existing_rows:
+            raise PermissionDeniedError("This Roblox account is already linked to another Discord user.")
+
         await self.database.execute(
             """
             INSERT INTO roblox_links (user_id, roblox_sub, roblox_username, roblox_display_name, profile_url, raw_profile_json)
@@ -150,6 +157,29 @@ class RobloxOAuthService:
         )
         if row is None:
             raise NotFoundError("No linked Roblox account found for that user.")
+        return RobloxLinkRecord(
+            user_id=int(row["user_id"]),
+            roblox_sub=str(row["roblox_sub"]),
+            roblox_username=str(row["roblox_username"]) if row["roblox_username"] else None,
+            roblox_display_name=str(row["roblox_display_name"]) if row["roblox_display_name"] else None,
+            profile_url=str(row["profile_url"]) if row["profile_url"] else None,
+            linked_at=str(row["linked_at"]),
+        )
+
+    async def get_link_by_roblox_sub(self, roblox_sub: str) -> RobloxLinkRecord:
+        rows = await self.database.fetchall(
+            "SELECT * FROM roblox_links WHERE roblox_sub = ? ORDER BY linked_at DESC",
+            (roblox_sub,),
+        )
+        if not rows:
+            raise NotFoundError("No linked Discord user found for that Roblox account.")
+
+        if len(rows) > 1:
+            raise ExternalServiceError(
+                "Multiple Discord users are linked to this Roblox account. Resolve the duplicate links before auto-delivery can continue."
+            )
+
+        row = rows[0]
         return RobloxLinkRecord(
             user_id=int(row["user_id"]),
             roblox_sub=str(row["roblox_sub"]),

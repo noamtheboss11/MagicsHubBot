@@ -24,6 +24,7 @@ from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
+from sales_bot.services.roblox_creator import RobloxCreatorService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 from sales_bot.ui.appeals import AppealDecisionView
@@ -45,6 +46,7 @@ class SalesBot(commands.Bot):
         "sales_bot.cogs.orders",
         "sales_bot.cogs.vouches",
         "sales_bot.cogs.oauth",
+        "sales_bot.cogs.roblox_owner",
         "sales_bot.cogs.support",
         "sales_bot.cogs.engagement",
         "sales_bot.cogs.ai_support",
@@ -80,6 +82,7 @@ class SalesBot(commands.Bot):
             payments=PaymentService(self.database),
             vouches=VouchService(self.database),
             oauth=RobloxOAuthService(self.database, self.settings),
+            roblox_creator=RobloxCreatorService(self.database, self.settings),
             panels=AdminPanelService(self.database, self.settings.admin_panel_session_minutes),
             polls=PollService(self.database),
             giveaways=GiveawayService(self.database),

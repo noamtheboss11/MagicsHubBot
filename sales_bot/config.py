@@ -99,6 +99,11 @@ class Settings:
     roblox_entry_link: str | None
     roblox_privacy_policy_url: str | None
     roblox_terms_url: str | None
+    roblox_owner_client_id: str | None
+    roblox_owner_client_secret: str | None
+    roblox_owner_redirect_uri: str | None
+    roblox_owner_universe_id: int | None
+    roblox_gamepass_webhook_token: str | None
     gemini_api_key: str | None
     gemini_model: str
     public_base_url: str
@@ -128,6 +133,20 @@ class Settings:
             )
         )
 
+    @property
+    def roblox_owner_oauth_enabled(self) -> bool:
+        return all(
+            (
+                self.roblox_owner_client_id,
+                self.roblox_owner_client_secret,
+                self.roblox_owner_redirect_uri,
+            )
+        )
+
+    @property
+    def roblox_owner_gamepass_management_enabled(self) -> bool:
+        return self.roblox_owner_oauth_enabled and self.roblox_owner_universe_id is not None
+
     @classmethod
     def from_env(cls) -> "Settings":
         base_dir = Path(__file__).resolve().parent.parent
@@ -142,6 +161,9 @@ class Settings:
         roblox_entry_link = _optional_env("ROBLOX_ENTRY_LINK") or f"{public_base_url}/link"
         roblox_privacy_policy_url = _optional_env("ROBLOX_PRIVACY_POLICY_URL") or f"{public_base_url}/privacy"
         roblox_terms_url = _optional_env("ROBLOX_TERMS_URL") or f"{public_base_url}/terms"
+        roblox_owner_redirect_uri = (
+            _optional_env("ROBLOX_OWNER_REDIRECT_URI") or f"{public_base_url}/oauth/roblox/owner/callback"
+        )
         ai_support_channel_id = _int_with_default("AI_SUPPORT_CHANNEL_ID", 1494689678975172710)
         ai_training_channel_id = _optional_int("AI_TRAINING_CHANNEL_ID") or ai_support_channel_id
 
@@ -162,6 +184,11 @@ class Settings:
             roblox_entry_link=roblox_entry_link,
             roblox_privacy_policy_url=roblox_privacy_policy_url,
             roblox_terms_url=roblox_terms_url,
+            roblox_owner_client_id=_optional_env("ROBLOX_OWNER_CLIENT_ID"),
+            roblox_owner_client_secret=_optional_env("ROBLOX_OWNER_CLIENT_SECRET"),
+            roblox_owner_redirect_uri=roblox_owner_redirect_uri,
+            roblox_owner_universe_id=_optional_int("ROBLOX_OWNER_UNIVERSE_ID"),
+            roblox_gamepass_webhook_token=_optional_env("ROBLOX_GAMEPASS_WEBHOOK_TOKEN"),
             gemini_api_key=_optional_env("GEMINI_API_KEY"),
             gemini_model=_normalized_gemini_model(os.getenv("GEMINI_MODEL")),
             public_base_url=public_base_url,

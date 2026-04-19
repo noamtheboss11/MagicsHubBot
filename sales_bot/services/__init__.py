@@ -12,6 +12,7 @@ from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
 from sales_bot.services.panels import AdminPanelService
 from sales_bot.services.payments import PaymentService
+from sales_bot.services.roblox_creator import RobloxCreatorService
 from sales_bot.services.systems import SystemService
 from sales_bot.services.vouches import VouchService
 
@@ -27,6 +28,7 @@ class ServiceContainer:
     payments: PaymentService
     vouches: VouchService
     oauth: RobloxOAuthService
+    roblox_creator: RobloxCreatorService
     panels: AdminPanelService
     polls: PollService
     giveaways: GiveawayService
