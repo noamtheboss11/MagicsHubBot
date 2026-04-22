@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 
-from sales_bot.exceptions import ExternalServiceError, NotFoundError
+from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
 from sales_bot.web_admin import (
     giveaway_create_page,
     giveaway_edit_page,
@@ -29,6 +29,7 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_get("/privacy", privacy_page)
     app.router.add_get("/terms", terms_page)
     app.router.add_get("/health", healthcheck)
+    app.router.add_post("/api/roblox/game/bootstrap", roblox_game_bootstrap)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
     app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
@@ -99,6 +100,176 @@ def html_response(title: str, body: str) -> web.Response:
     </html>
     """
     return web.Response(text=content, content_type="text/html")
+
+
+def _roblox_request_token(request: web.Request) -> str:
+    return request.headers.get("X-Roblox-Webhook-Token", "") or request.headers.get("X-Webhook-Token", "")
+
+
+def _authorize_roblox_request(bot: "SalesBot", request: web.Request) -> web.Response | None:
+    expected_token = bot.settings.roblox_gamepass_webhook_token or ""
+    provided_token = _roblox_request_token(request)
+    if not expected_token:
+        return web.json_response({"error": "webhook not configured"}, status=503)
+    if provided_token != expected_token:
+        return web.json_response({"error": "unauthorized"}, status=401)
+    return None
+
+
+def _payload_string(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+async def _resolve_roblox_owner_context(bot: "SalesBot") -> tuple[int, int]:
+    if bot.settings.primary_guild_id is not None:
+        record = await bot.services.roblox_creator.get_link(bot.settings.primary_guild_id)
+        return bot.settings.primary_guild_id, record.discord_user_id
+
+    row = await bot.database.fetchone(
+        "SELECT guild_id, discord_user_id FROM roblox_owner_links ORDER BY linked_at DESC LIMIT 1"
+    )
+    if row is None:
+        raise NotFoundError("No Roblox owner access is linked yet.")
+
+    return int(row["guild_id"]), int(row["discord_user_id"])
+
+
+async def _resolve_connected_account_label(bot: "SalesBot", discord_user_id: int) -> str:
+    user = bot.get_user(discord_user_id)
+    if user is None:
+        try:
+            user = await bot.fetch_user(discord_user_id)
+        except Exception:
+            return str(discord_user_id)
+
+    username = str(getattr(user, "name", "") or "").strip()
+    global_name = str(getattr(user, "global_name", "") or "").strip()
+    if global_name and username and global_name.casefold() != username.casefold():
+        return f"{global_name} (@{username})"
+    if username:
+        return f"@{username}"
+    if global_name:
+        return global_name
+    return str(discord_user_id)
+
+
+async def _build_roblox_catalog(bot: "SalesBot") -> tuple[list[dict[str, Any]], str]:
+    systems = await bot.services.systems.list_robux_enabled_systems()
+    remote_gamepasses_by_id: dict[str, Any] = {}
+    catalog_source = "database"
+
+    if bot.settings.roblox_owner_gamepass_management_enabled:
+        try:
+            guild_id, discord_user_id = await _resolve_roblox_owner_context(bot)
+            remote_gamepasses = await bot.services.roblox_creator.list_gamepasses(bot, guild_id, discord_user_id)
+            remote_gamepasses_by_id = {
+                str(gamepass.game_pass_id): gamepass for gamepass in remote_gamepasses
+            }
+            catalog_source = "roblox+database"
+        except (NotFoundError, ExternalServiceError, PermissionDeniedError) as exc:
+            LOGGER.warning("Roblox catalog sync fell back to database-only data: %s", exc)
+
+    catalog: list[dict[str, Any]] = []
+    for system in systems:
+        gamepass_id = str(system.roblox_gamepass_id or "").strip()
+        if not gamepass_id:
+            continue
+
+        remote_gamepass = remote_gamepasses_by_id.get(gamepass_id)
+        icon_asset_id = remote_gamepass.icon_asset_id if remote_gamepass is not None else None
+        thumbnail = ""
+        if icon_asset_id is not None:
+            thumbnail = f"rbxthumb://type=Asset&id={icon_asset_id}&w=420&h=420"
+
+        title = system.name
+        description = system.description
+        price_in_robux: int | None = None
+        is_for_sale = True
+        if remote_gamepass is not None:
+            title = remote_gamepass.name or title
+            description = remote_gamepass.description or description
+            price_in_robux = remote_gamepass.price_in_robux
+            is_for_sale = remote_gamepass.is_for_sale
+
+        catalog.append(
+            {
+                "system_id": system.id,
+                "system_name": system.name,
+                "title": title,
+                "description": description,
+                "gamepass_id": int(gamepass_id),
+                "price": price_in_robux,
+                "price_in_robux": price_in_robux,
+                "icon_asset_id": icon_asset_id,
+                "thumbnail": thumbnail,
+                "is_for_sale": is_for_sale,
+                "purchase_url": bot.services.roblox_creator.gamepass_url(int(gamepass_id)),
+            }
+        )
+
+    catalog.sort(key=lambda item: (str(item["title"]).lower(), int(item["gamepass_id"])))
+    return catalog, catalog_source
+
+
+async def roblox_game_bootstrap(request: web.Request) -> web.Response:
+    bot: SalesBot = request.app["bot"]
+    authorization_error = _authorize_roblox_request(bot, request)
+    if authorization_error is not None:
+        return authorization_error
+
+    try:
+        payload = await request.json()
+    except ValueError:
+        return web.json_response({"error": "invalid json"}, status=400)
+
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "invalid payload"}, status=400)
+
+    roblox_user_id = _payload_string(
+        payload,
+        "roblox_user_id",
+        "robloxUserId",
+        "player_user_id",
+        "playerUserId",
+        "user_id",
+        "userId",
+    )
+    if not roblox_user_id.isdigit():
+        return web.json_response({"error": "invalid payload"}, status=400)
+
+    player_payload: dict[str, Any] = {
+        "roblox_user_id": int(roblox_user_id),
+        "is_linked": False,
+        "discord_user_id": None,
+        "connected_account": "",
+    }
+    try:
+        link = await bot.services.oauth.get_link_by_roblox_sub(roblox_user_id)
+    except NotFoundError:
+        pass
+    except ExternalServiceError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    else:
+        player_payload.update(
+            {
+                "is_linked": True,
+                "discord_user_id": link.user_id,
+                "connected_account": await _resolve_connected_account_label(bot, link.user_id),
+            }
+        )
+
+    catalog, catalog_source = await _build_roblox_catalog(bot)
+    return web.json_response(
+        {
+            "player": player_payload,
+            "catalog": catalog,
+            "catalog_source": catalog_source,
+        }
+    )
 
 
 async def landing_page(request: web.Request) -> web.Response:
@@ -250,32 +421,29 @@ async def paypal_webhook(request: web.Request) -> web.Response:
 
 async def roblox_gamepass_webhook(request: web.Request) -> web.Response:
     bot: SalesBot = request.app["bot"]
-    expected_token = bot.settings.roblox_gamepass_webhook_token or ""
-    provided_token = request.headers.get("X-Roblox-Webhook-Token", "") or request.headers.get("X-Webhook-Token", "")
-    if not expected_token:
-        return web.json_response({"error": "webhook not configured"}, status=503)
-    if provided_token != expected_token:
-        return web.json_response({"error": "unauthorized"}, status=401)
+    authorization_error = _authorize_roblox_request(bot, request)
+    if authorization_error is not None:
+        return authorization_error
 
     payload: dict[str, Any] = await request.json()
-    roblox_user_id = str(
-        payload.get("roblox_user_id")
-        or payload.get("robloxUserId")
-        or payload.get("player_user_id")
-        or payload.get("playerUserId")
-        or payload.get("user_id")
-        or payload.get("userId")
-        or ""
-    ).strip()
-    gamepass_id = str(
-        payload.get("gamepass_id")
-        or payload.get("gamePassId")
-        or payload.get("pass_id")
-        or payload.get("passId")
-        or payload.get("purchased_gamepass_id")
-        or payload.get("purchasedGamePassId")
-        or ""
-    ).strip()
+    roblox_user_id = _payload_string(
+        payload,
+        "roblox_user_id",
+        "robloxUserId",
+        "player_user_id",
+        "playerUserId",
+        "user_id",
+        "userId",
+    )
+    gamepass_id = _payload_string(
+        payload,
+        "gamepass_id",
+        "gamePassId",
+        "pass_id",
+        "passId",
+        "purchased_gamepass_id",
+        "purchasedGamePassId",
+    )
 
     if not roblox_user_id.isdigit() or not gamepass_id.isdigit():
         return web.json_response({"error": "invalid payload"}, status=400)
