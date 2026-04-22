@@ -292,6 +292,63 @@ class RobloxCreatorService:
 
         return sorted(gamepasses, key=lambda item: (item.name.lower(), item.game_pass_id))
 
+    async def search_gamepasses(
+        self,
+        bot: "SalesBot",
+        guild_id: int,
+        discord_user_id: int,
+        *,
+        current: str,
+        limit: int = 25,
+    ) -> list[RobloxGamePassRecord]:
+        self.ensure_gamepass_management_configured()
+        normalized = current.casefold().strip()
+        matched_gamepasses: list[RobloxGamePassRecord] = []
+        page_token: str | None = None
+
+        while True:
+            params: dict[str, str | int] = {"pageSize": 100}
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = await self._authorized_request(
+                bot,
+                guild_id=guild_id,
+                discord_user_id=discord_user_id,
+                method="GET",
+                url=self.LIST_GAMEPASSES_ENDPOINT.format(universe_id=self.settings.roblox_owner_universe_id),
+                params=params,
+            )
+            if not isinstance(data, dict):
+                raise ExternalServiceError("Roblox returned an unexpected game pass list response.")
+
+            raw_gamepasses = data.get("gamePasses")
+            if not isinstance(raw_gamepasses, list):
+                raise ExternalServiceError("Roblox returned an invalid game pass list response.")
+
+            page_items = [self._map_gamepass(item) for item in raw_gamepasses if isinstance(item, dict)]
+
+            if normalized:
+                page_items = [
+                    gamepass
+                    for gamepass in page_items
+                    if normalized in gamepass.name.casefold() or normalized in str(gamepass.game_pass_id)
+                ]
+
+            matched_gamepasses.extend(page_items)
+            if len(matched_gamepasses) >= limit:
+                break
+
+            next_page_token = data.get("nextPageToken")
+            if not next_page_token:
+                break
+            page_token = str(next_page_token)
+
+            if not normalized and matched_gamepasses:
+                break
+
+        return sorted(matched_gamepasses, key=lambda item: (item.name.lower(), item.game_pass_id))[:limit]
+
     async def get_gamepass(
         self,
         bot: "SalesBot",

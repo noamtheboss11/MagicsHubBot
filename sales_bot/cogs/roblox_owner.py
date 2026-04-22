@@ -32,25 +32,18 @@ async def owner_gamepass_autocomplete(
         return []
 
     try:
-        gamepasses = await bot.services.roblox_creator.list_gamepasses(
+        gamepasses = await bot.services.roblox_creator.search_gamepasses(
             bot,
             interaction.guild.id,
             interaction.user.id,
+            current=current,
+            limit=25,
         )
     except Exception:
         return []
 
-    normalized = current.casefold().strip()
-    filtered = [
-        gamepass
-        for gamepass in gamepasses
-        if not normalized
-        or normalized in gamepass.name.casefold()
-        or normalized in str(gamepass.game_pass_id)
-    ]
-
     choices: list[app_commands.Choice[str]] = []
-    for gamepass in filtered[:25]:
+    for gamepass in gamepasses[:25]:
         price_label = f"{gamepass.price_in_robux} R$" if gamepass.price_in_robux is not None else "No price"
         sale_label = "on sale" if gamepass.is_for_sale else "off sale"
         choice_name = f"{gamepass.name} [{price_label}, {sale_label}]"
