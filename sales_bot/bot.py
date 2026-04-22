@@ -67,6 +67,7 @@ class SalesBot(commands.Bot):
         self.services: ServiceContainer
         self._command_sync_lock = asyncio.Lock()
         self._maintenance_task: asyncio.Task[None] | None = None
+        self._roblox_gamepass_cache_warmup_task: asyncio.Task[None] | None = None
         self.tree.on_error = self.on_app_command_error
 
     async def setup_hook(self) -> None:
@@ -96,6 +97,10 @@ class SalesBot(commands.Bot):
         await self._restore_persistent_views()
         await self._start_web_server()
         self._maintenance_task = asyncio.create_task(self._maintenance_loop(), name="engagement-maintenance")
+        self._roblox_gamepass_cache_warmup_task = asyncio.create_task(
+            self.services.roblox_creator.warm_gamepass_cache(self),
+            name="roblox-gamepass-cache-warmup",
+        )
 
         if self.settings.sync_commands_on_startup:
             await self._sync_commands()
@@ -169,6 +174,11 @@ class SalesBot(commands.Bot):
         )
 
     async def close(self) -> None:
+        if self._roblox_gamepass_cache_warmup_task is not None:
+            self._roblox_gamepass_cache_warmup_task.cancel()
+            await asyncio.gather(self._roblox_gamepass_cache_warmup_task, return_exceptions=True)
+            self._roblox_gamepass_cache_warmup_task = None
+
         if self._maintenance_task is not None:
             self._maintenance_task.cancel()
             await asyncio.gather(self._maintenance_task, return_exceptions=True)

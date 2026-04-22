@@ -36,10 +36,12 @@ class RobloxCreatorService:
     CREATE_GAMEPASS_LOOKUP_ATTEMPTS = 4
     CREATE_GAMEPASS_LOOKUP_DELAY_SECONDS = 1.0
     CREATE_GAMEPASS_LOOKUP_CLOCK_SKEW_SECONDS = 30
+    GAMEPASS_CACHE_TTL_SECONDS = 300
 
     def __init__(self, database: Database, settings: Settings) -> None:
         self.database = database
         self.settings = settings
+        self._gamepass_cache: dict[int, tuple[datetime, list[RobloxGamePassRecord]]] = {}
 
     def ensure_oauth_configured(self) -> None:
         if not self.settings.roblox_owner_oauth_enabled:
@@ -238,8 +240,36 @@ class RobloxCreatorService:
                 token_expires_at.isoformat(),
             ),
         )
+        self.invalidate_gamepass_cache(guild_id)
         LOGGER.info("Linked Roblox owner access for guild %s using Discord user %s", guild_id, discord_user_id)
         return await self.get_link(guild_id)
+
+    def invalidate_gamepass_cache(self, guild_id: int) -> None:
+        self._gamepass_cache.pop(guild_id, None)
+
+    async def warm_gamepass_cache(self, bot: "SalesBot") -> None:
+        if not self.settings.roblox_owner_gamepass_management_enabled or bot.http_session is None:
+            return
+
+        try:
+            rows = await self.database.fetchall(
+                "SELECT guild_id, discord_user_id FROM roblox_owner_links ORDER BY guild_id ASC"
+            )
+        except Exception:
+            LOGGER.exception("Failed to read Roblox owner links for gamepass cache warmup")
+            return
+
+        for row in rows:
+            guild_id = int(row["guild_id"])
+            discord_user_id = int(row["discord_user_id"])
+            try:
+                await self.list_gamepasses(bot, guild_id, discord_user_id, force_refresh=True)
+            except Exception as exc:
+                LOGGER.warning(
+                    "Roblox gamepass cache warmup failed for guild %s: %s",
+                    guild_id,
+                    exc,
+                )
 
     async def get_link(self, guild_id: int) -> RobloxOwnerLinkRecord:
         row = await self._get_link_row(guild_id)
@@ -255,6 +285,23 @@ class RobloxCreatorService:
         return record
 
     async def list_gamepasses(
+        self,
+        bot: "SalesBot",
+        guild_id: int,
+        discord_user_id: int,
+        *,
+        force_refresh: bool = False,
+    ) -> list[RobloxGamePassRecord]:
+        self.ensure_gamepass_management_configured()
+        if not force_refresh:
+            cached_gamepasses = self._get_cached_gamepasses(guild_id)
+            if cached_gamepasses is not None:
+                return list(cached_gamepasses)
+
+        gamepasses = await self._refresh_gamepass_cache(bot, guild_id, discord_user_id)
+        return list(gamepasses)
+
+    async def _refresh_gamepass_cache(
         self,
         bot: "SalesBot",
         guild_id: int,
@@ -290,7 +337,9 @@ class RobloxCreatorService:
                 break
             page_token = str(next_page_token)
 
-        return sorted(gamepasses, key=lambda item: (item.name.lower(), item.game_pass_id))
+        sorted_gamepasses = sorted(gamepasses, key=lambda item: (item.name.lower(), item.game_pass_id))
+        self._set_cached_gamepasses(guild_id, sorted_gamepasses)
+        return sorted_gamepasses
 
     async def search_gamepasses(
         self,
@@ -303,51 +352,44 @@ class RobloxCreatorService:
     ) -> list[RobloxGamePassRecord]:
         self.ensure_gamepass_management_configured()
         normalized = current.casefold().strip()
-        matched_gamepasses: list[RobloxGamePassRecord] = []
-        page_token: str | None = None
+        cached_gamepasses = self._get_cached_gamepasses(guild_id)
+        if cached_gamepasses is None:
+            try:
+                cached_gamepasses = await asyncio.wait_for(
+                    self._refresh_gamepass_cache(bot, guild_id, discord_user_id),
+                    timeout=2.0,
+                )
+            except TimeoutError:
+                LOGGER.warning(
+                    "Timed out warming Roblox gamepass autocomplete cache for guild %s",
+                    guild_id,
+                )
+                return []
 
-        while True:
-            params: dict[str, str | int] = {"pageSize": 100}
-            if page_token:
-                params["pageToken"] = page_token
+        matched_gamepasses = [
+            gamepass
+            for gamepass in cached_gamepasses
+            if not normalized
+            or normalized in gamepass.name.casefold()
+            or normalized in str(gamepass.game_pass_id)
+        ]
+        return matched_gamepasses[:limit]
 
-            data = await self._authorized_request(
-                bot,
-                guild_id=guild_id,
-                discord_user_id=discord_user_id,
-                method="GET",
-                url=self.LIST_GAMEPASSES_ENDPOINT.format(universe_id=self.settings.roblox_owner_universe_id),
-                params=params,
-            )
-            if not isinstance(data, dict):
-                raise ExternalServiceError("Roblox returned an unexpected game pass list response.")
+    def _get_cached_gamepasses(self, guild_id: int) -> list[RobloxGamePassRecord] | None:
+        cached_entry = self._gamepass_cache.get(guild_id)
+        if cached_entry is None:
+            return None
 
-            raw_gamepasses = data.get("gamePasses")
-            if not isinstance(raw_gamepasses, list):
-                raise ExternalServiceError("Roblox returned an invalid game pass list response.")
+        cached_at, gamepasses = cached_entry
+        cache_deadline = cached_at + timedelta(seconds=self.GAMEPASS_CACHE_TTL_SECONDS)
+        if cache_deadline <= datetime.now(UTC):
+            self.invalidate_gamepass_cache(guild_id)
+            return None
 
-            page_items = [self._map_gamepass(item) for item in raw_gamepasses if isinstance(item, dict)]
+        return list(gamepasses)
 
-            if normalized:
-                page_items = [
-                    gamepass
-                    for gamepass in page_items
-                    if normalized in gamepass.name.casefold() or normalized in str(gamepass.game_pass_id)
-                ]
-
-            matched_gamepasses.extend(page_items)
-            if len(matched_gamepasses) >= limit:
-                break
-
-            next_page_token = data.get("nextPageToken")
-            if not next_page_token:
-                break
-            page_token = str(next_page_token)
-
-            if not normalized and matched_gamepasses:
-                break
-
-        return sorted(matched_gamepasses, key=lambda item: (item.name.lower(), item.game_pass_id))[:limit]
+    def _set_cached_gamepasses(self, guild_id: int, gamepasses: list[RobloxGamePassRecord]) -> None:
+        self._gamepass_cache[guild_id] = (datetime.now(UTC), list(gamepasses))
 
     async def get_gamepass(
         self,
@@ -428,11 +470,13 @@ class RobloxCreatorService:
                     "Roblox reported create failure for game pass %r, but the game pass appeared shortly after the request.",
                     normalized_name,
                 )
+                self.invalidate_gamepass_cache(guild_id)
                 return fallback_gamepass
             raise
 
         gamepass = self._extract_gamepass_from_response(data, expected_name=normalized_name)
         if gamepass is not None:
+            self.invalidate_gamepass_cache(guild_id)
             return gamepass
 
         fallback_gamepass = await self._wait_for_recent_gamepass_by_name(
@@ -447,6 +491,7 @@ class RobloxCreatorService:
                 "Roblox returned an unexpected create response for game pass %r, but the game pass appeared shortly after the request.",
                 normalized_name,
             )
+            self.invalidate_gamepass_cache(guild_id)
             return fallback_gamepass
 
         if not isinstance(data, dict):
