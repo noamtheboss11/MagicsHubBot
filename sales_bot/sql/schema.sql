@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS systems (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS roblox_gamepass_display_names (
+    gamepass_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS system_assets (
     system_id INTEGER NOT NULL,
     asset_type TEXT NOT NULL CHECK (asset_type IN ('file', 'image')),

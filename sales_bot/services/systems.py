@@ -288,6 +288,60 @@ class SystemService:
         )
         return await self.get_system(system_id)
 
+    async def get_gamepass_display_name(self, gamepass_reference: str | None) -> str | None:
+        normalized_gamepass_id = self.normalize_gamepass_reference(gamepass_reference)
+        if not normalized_gamepass_id:
+            return None
+
+        row = await self.database.fetchone(
+            "SELECT display_name FROM roblox_gamepass_display_names WHERE gamepass_id = ?",
+            (normalized_gamepass_id,),
+        )
+        if row is None:
+            return None
+        return str(row["display_name"])
+
+    async def list_gamepass_display_names(self, gamepass_references: list[str]) -> dict[str, str]:
+        normalized_gamepass_ids: list[str] = []
+        for reference in gamepass_references:
+            normalized_gamepass_id = self.normalize_gamepass_reference(reference)
+            if normalized_gamepass_id and normalized_gamepass_id not in normalized_gamepass_ids:
+                normalized_gamepass_ids.append(normalized_gamepass_id)
+
+        if not normalized_gamepass_ids:
+            return {}
+
+        placeholders = ", ".join("?" for _ in normalized_gamepass_ids)
+        rows = await self.database.fetchall(
+            f"SELECT gamepass_id, display_name FROM roblox_gamepass_display_names WHERE gamepass_id IN ({placeholders})",
+            tuple(normalized_gamepass_ids),
+        )
+        return {str(row["gamepass_id"]): str(row["display_name"]) for row in rows}
+
+    async def set_gamepass_display_name(self, gamepass_reference: str, display_name: str | None) -> str | None:
+        normalized_gamepass_id = self.normalize_gamepass_reference(gamepass_reference)
+        if not normalized_gamepass_id:
+            raise NotFoundError("Game pass not found.")
+
+        cleaned_display_name = display_name.strip() if display_name else ""
+        if not cleaned_display_name:
+            await self.database.execute(
+                "DELETE FROM roblox_gamepass_display_names WHERE gamepass_id = ?",
+                (normalized_gamepass_id,),
+            )
+            return None
+
+        await self.database.execute(
+            """
+            INSERT INTO roblox_gamepass_display_names (gamepass_id, display_name)
+            VALUES (?, ?)
+            ON CONFLICT(gamepass_id)
+            DO UPDATE SET display_name = excluded.display_name, updated_at = CURRENT_TIMESTAMP
+            """,
+            (normalized_gamepass_id, cleaned_display_name),
+        )
+        return cleaned_display_name
+
     async def get_system_asset(self, system_id: int, *, asset_type: str) -> SystemAssetRecord | None:
         row = await self.database.fetchone(
             "SELECT * FROM system_assets WHERE system_id = ? AND asset_type = ?",

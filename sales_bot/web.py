@@ -160,6 +160,9 @@ async def _resolve_connected_account_label(bot: "SalesBot", discord_user_id: int
 async def _build_roblox_catalog(bot: "SalesBot") -> tuple[list[dict[str, Any]], str]:
     systems = await bot.services.systems.list_robux_enabled_systems()
     remote_gamepasses_by_id: dict[str, Any] = {}
+    display_name_overrides = await bot.services.systems.list_gamepass_display_names(
+        [str(system.roblox_gamepass_id) for system in systems if system.roblox_gamepass_id]
+    )
     catalog_source = "database"
 
     if bot.settings.roblox_owner_gamepass_management_enabled:
@@ -185,12 +188,13 @@ async def _build_roblox_catalog(bot: "SalesBot") -> tuple[list[dict[str, Any]], 
         if icon_asset_id is not None:
             thumbnail = f"rbxthumb://type=Asset&id={icon_asset_id}&w=420&h=420"
 
-        title = system.name
+        title = display_name_overrides.get(gamepass_id) or system.name
         description = system.description
         price_in_robux: int | None = None
         is_for_sale = True
         if remote_gamepass is not None:
-            title = remote_gamepass.name or title
+            if not display_name_overrides.get(gamepass_id):
+                title = remote_gamepass.name or title
             description = remote_gamepass.description or description
             price_in_robux = remote_gamepass.price_in_robux
             is_for_sale = remote_gamepass.is_for_sale

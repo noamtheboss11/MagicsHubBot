@@ -69,7 +69,12 @@ def _gamepass_price_label(gamepass: RobloxGamePassRecord) -> str:
     return f"{gamepass.price_in_robux} Robux" if gamepass.price_in_robux is not None else "Not priced"
 
 
-def _build_gamepass_embed(gamepass: RobloxGamePassRecord, linked_system: SystemRecord | None) -> discord.Embed:
+def _build_gamepass_embed(
+    gamepass: RobloxGamePassRecord,
+    linked_system: SystemRecord | None,
+    *,
+    display_gamepass_name: str | None = None,
+) -> discord.Embed:
     embed = discord.Embed(
         title=gamepass.name,
         description=gamepass.description or "No description set for this game pass.",
@@ -88,6 +93,8 @@ def _build_gamepass_embed(gamepass: RobloxGamePassRecord, linked_system: SystemR
         value=linked_system.name if linked_system is not None else "Not linked yet",
         inline=False,
     )
+    if display_gamepass_name:
+        embed.add_field(name="Display Gamepass Name", value=display_gamepass_name, inline=False)
     return embed
 
 
@@ -180,6 +187,7 @@ class RobloxOwnerCog(commands.Cog):
     @app_commands.command(name="creategamepass", description="Server owner: create a Roblox game pass for the configured universe.")
     @app_commands.describe(
         name="The name of the new game pass.",
+        display_gamepass_name="Optional in-game name shown in Studio instead of the Roblox game pass name.",
         price="Default Robux price.",
         description="Optional game pass description.",
         system="Optional system to connect immediately after creation.",
@@ -195,6 +203,7 @@ class RobloxOwnerCog(commands.Cog):
         interaction: discord.Interaction,
         name: str,
         price: app_commands.Range[int, 1, 1000000000],
+        display_gamepass_name: str | None = None,
         description: str | None = None,
         system: str | None = None,
         for_sale: bool = True,
@@ -225,11 +234,21 @@ class RobloxOwnerCog(commands.Cog):
         )
 
         linked_system: SystemRecord | None = None
+        stored_display_gamepass_name: str | None = None
+        if display_gamepass_name is not None:
+            stored_display_gamepass_name = await self.bot.services.systems.set_gamepass_display_name(
+                str(gamepass.game_pass_id),
+                display_gamepass_name,
+            )
         if system:
             selected_system = await self.bot.services.systems.get_system_by_name(system)
             linked_system = await self.bot.services.systems.set_system_gamepass(selected_system.id, str(gamepass.game_pass_id))
 
-        embed = _build_gamepass_embed(gamepass, linked_system)
+        embed = _build_gamepass_embed(
+            gamepass,
+            linked_system,
+            display_gamepass_name=stored_display_gamepass_name,
+        )
         embed.title = f"Created Game Pass: {gamepass.name}"
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -237,6 +256,7 @@ class RobloxOwnerCog(commands.Cog):
     @app_commands.describe(
         gamepass="The Roblox game pass to update.",
         name="Optional new name.",
+        display_gamepass_name="Optional in-game name shown in Studio instead of the Roblox game pass name.",
         description="Optional new description.",
         price="Optional new Robux price.",
         for_sale="Optional sale status.",
@@ -251,6 +271,7 @@ class RobloxOwnerCog(commands.Cog):
         interaction: discord.Interaction,
         gamepass: str,
         name: str | None = None,
+        display_gamepass_name: str | None = None,
         description: str | None = None,
         price: app_commands.Range[int, 1, 1000000000] | None = None,
         for_sale: bool | None = None,
@@ -262,7 +283,7 @@ class RobloxOwnerCog(commands.Cog):
         if image is not None and image.content_type and not image.content_type.startswith("image/"):
             await interaction.response.send_message("The thumbnail must be an image attachment.", ephemeral=True)
             return
-        if all(value is None for value in (name, description, price, for_sale, regional_pricing, image)):
+        if all(value is None for value in (name, display_gamepass_name, description, price, for_sale, regional_pricing, image)):
             await interaction.response.send_message("Provide at least one field to update.", ephemeral=True)
             return
 
@@ -283,8 +304,18 @@ class RobloxOwnerCog(commands.Cog):
             is_regional_pricing_enabled=regional_pricing,
             image_upload=image_upload,
         )
+        stored_display_gamepass_name = await self.bot.services.systems.get_gamepass_display_name(gamepass)
+        if display_gamepass_name is not None:
+            stored_display_gamepass_name = await self.bot.services.systems.set_gamepass_display_name(
+                gamepass,
+                display_gamepass_name,
+            )
         linked_system = await _linked_system_for_gamepass(self.bot, updated_gamepass.game_pass_id)
-        embed = _build_gamepass_embed(updated_gamepass, linked_system)
+        embed = _build_gamepass_embed(
+            updated_gamepass,
+            linked_system,
+            display_gamepass_name=stored_display_gamepass_name,
+        )
         embed.title = f"Updated Game Pass: {updated_gamepass.name}"
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -306,8 +337,13 @@ class RobloxOwnerCog(commands.Cog):
         )
         system_record = await self.bot.services.systems.get_system_by_name(system)
         linked_system = await self.bot.services.systems.set_system_gamepass(system_record.id, str(gamepass_record.game_pass_id))
+        display_gamepass_name = await self.bot.services.systems.get_gamepass_display_name(str(gamepass_record.game_pass_id))
 
-        embed = _build_gamepass_embed(gamepass_record, linked_system)
+        embed = _build_gamepass_embed(
+            gamepass_record,
+            linked_system,
+            display_gamepass_name=display_gamepass_name,
+        )
         embed.title = f"Connected {gamepass_record.name}"
         await interaction.followup.send(embed=embed, ephemeral=True)
 
