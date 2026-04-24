@@ -46,10 +46,23 @@ PORTAL_STYLE = """
 <style>
 .portal-root { display: flex; flex-direction: column; gap: 18px; }
 .top-strip { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
-.user-chip { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); }
+.user-chip { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); max-width: 100%; }
+.user-chip div { min-width: 0; }
 .user-chip img { width: 34px; height: 34px; border-radius: 999px; object-fit: cover; }
-.nav-links { display: flex; flex-wrap: wrap; gap: 10px; }
-.nav-links a { padding: 10px 14px; border-radius: 999px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); text-decoration: none; color: var(--text); }
+.admin-shell { gap: 22px; }
+.admin-topbar { display: flex; justify-content: flex-end; direction: ltr; }
+.user-chip-profile { direction: rtl; }
+.admin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; grid-template-areas: "main sidebar"; gap: 22px; align-items: start; direction: ltr; }
+.admin-sidebar { grid-area: sidebar; direction: rtl; }
+.admin-sidebar-card { display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 22px; background: rgba(9, 21, 36, 0.78); border: 1px solid rgba(134, 167, 201, 0.15); position: sticky; top: 22px; }
+.admin-sidebar-card p { margin: 0; }
+.admin-main { grid-area: main; min-width: 0; display: flex; flex-direction: column; gap: 18px; direction: rtl; }
+.admin-hero { padding: 22px; border-radius: 24px; background: linear-gradient(135deg, rgba(16, 37, 61, 0.92) 0%, rgba(8, 20, 35, 0.82) 100%); border: 1px solid rgba(134, 167, 201, 0.18); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+.admin-hero h1 { margin-bottom: 12px; }
+.admin-hero p:last-child { margin-bottom: 0; }
+.nav-links { display: flex; flex-direction: column; gap: 10px; }
+.nav-links a { padding: 12px 14px; border-radius: 16px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); text-decoration: none; color: var(--text); transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease; }
+.nav-links a:hover { background: rgba(85, 214, 190, 0.12); border-color: rgba(85, 214, 190, 0.28); transform: translateY(-1px); }
 .hero-grid, .stat-grid, .split-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 .card { padding: 18px; border-radius: 18px; background: rgba(9, 21, 36, 0.78); border: 1px solid rgba(134, 167, 201, 0.15); }
 .card h2, .card h3 { margin-top: 0; margin-bottom: 10px; }
@@ -75,10 +88,18 @@ td strong { color: var(--text); }
 .warning-note { color: #ff8579; font-weight: 700; }
 .muted { color: var(--muted); }
 .mono { font-family: Consolas, "Cascadia Mono", monospace; }
+@media (max-width: 900px) {
+    .admin-layout { grid-template-columns: 1fr; grid-template-areas: "sidebar" "main"; }
+    .admin-sidebar-card { position: static; }
+    .nav-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+    .nav-links a { text-align: center; }
+}
 @media (max-width: 700px) {
     .top-strip { align-items: stretch; }
-    .nav-links { width: 100%; }
-    .nav-links a { flex: 1 1 auto; text-align: center; }
+    .admin-topbar { justify-content: stretch; }
+    .user-chip-profile { width: 100%; }
+    .nav-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nav-links a { display: flex; align-items: center; justify-content: center; min-height: 48px; }
     .price-item { flex-direction: column; }
 }
 </style>
@@ -120,33 +141,45 @@ def _admin_shell(
     avatar_url = _session_avatar(session)
     avatar_html = f'<img src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else ""
     return f"""
-    <div class="portal-root" dir="rtl">
-        <div class="top-strip">
-            <div class="user-chip">
+    <div class="portal-root admin-shell" dir="rtl">
+        <div class="admin-topbar">
+            <div class="user-chip user-chip-profile">
                 {avatar_html}
                 <div>
                     <strong>{_escape(_session_label(session))}</strong><br>
                     <span class="muted mono">{_escape(session.discord_user_id)}</span>
                 </div>
             </div>
-            <div class="nav-links">
-                <a href="/admin">לוח ניהול</a>
-                <a href="/admin/admins">אדמינים</a>
-                <a href="/admin/custom-orders">הזמנות אישיות</a>
-                <a href="/admin/systems">מערכות</a>
-                <a href="/admin/gamepasses">גיימפאסים</a>
-                <a href="/admin/special-systems">מערכות מיוחדות</a>
-                <a href="/admin/special-orders">הזמנות מיוחדות</a>
-                <a href="/admin/polls/new">סקרים</a>
-                <a href="/admin/giveaways/new">הגרלות</a>
-                <a href="/admin/events/new">אירועים</a>
-                <a href="/auth/logout">התנתק</a>
+        </div>
+        <div class="admin-layout">
+            <aside class="admin-sidebar">
+                <div class="admin-sidebar-card">
+                    <p class="eyebrow">ניווט מהיר</p>
+                    <p>מעבר בין כל כלי הניהול של האתר מתוך תפריט צד קבוע.</p>
+                    <div class="nav-links">
+                        <a href="/admin">לוח ניהול</a>
+                        <a href="/admin/admins">אדמינים</a>
+                        <a href="/admin/custom-orders">הזמנות אישיות</a>
+                        <a href="/admin/systems">מערכות</a>
+                        <a href="/admin/gamepasses">גיימפאסים</a>
+                        <a href="/admin/special-systems">מערכות מיוחדות</a>
+                        <a href="/admin/special-orders">הזמנות מיוחדות</a>
+                        <a href="/admin/polls/new">סקרים</a>
+                        <a href="/admin/giveaways/new">הגרלות</a>
+                        <a href="/admin/events/new">אירועים</a>
+                        <a href="/auth/logout">התנתק</a>
+                    </div>
+                </div>
+            </aside>
+            <div class="admin-main">
+                <div class="admin-hero">
+                    <p class="eyebrow">אתר ניהול</p>
+                    <h1>{_escape(title)}</h1>
+                    <p>{_escape(intro)}</p>
+                </div>
+                {content}
             </div>
         </div>
-        <p class="eyebrow">אתר ניהול</p>
-        <h1>{_escape(title)}</h1>
-        <p>{_escape(intro)}</p>
-        {content}
     </div>
     """
 
