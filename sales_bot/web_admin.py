@@ -87,15 +87,15 @@ def admin_html_response(title: str, body: str) -> web.Response:
                     linear-gradient(160deg, #03080f 0%, #07111f 48%, #0d1e31 100%);
             }}
             main {{
-                max-width: 980px;
+                width: min(100%, 1380px);
                 margin: 0 auto;
-                padding: 44px 18px 72px;
+                padding: 36px 24px 72px;
             }}
             .shell {{
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
                 border-radius: 26px;
-                padding: 30px;
+                padding: 36px;
                 box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
                 backdrop-filter: blur(14px);
             }}
@@ -108,7 +108,7 @@ def admin_html_response(title: str, body: str) -> web.Response:
             }}
             h1 {{
                 margin: 0 0 10px;
-                font-size: clamp(2rem, 4vw, 3rem);
+                font-size: clamp(2.2rem, 4vw, 3.35rem);
                 line-height: 1.05;
             }}
             p, li, label, small {{
