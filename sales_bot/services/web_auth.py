@@ -154,7 +154,7 @@ class WebAuthService:
         refreshed_expires_at = now + timedelta(hours=self.SESSION_LIFETIME_HOURS)
         await self.database.execute(
             "UPDATE web_sessions SET last_seen_at = ?, expires_at = ? WHERE token = ?",
-            (now.isoformat(), refreshed_expires_at.isoformat(), token),
+            (now if self.database.database_url else now.isoformat(), refreshed_expires_at.isoformat(), token),
         )
         return WebsiteSessionRecord(
             token=record.token,

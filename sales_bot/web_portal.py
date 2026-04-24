@@ -558,9 +558,7 @@ async def _send_account_payment_submission_to_admins(
     profile_image: tuple[str, bytes, str | None] | None,
     has_email: bool,
     has_phone: bool,
-    phone_details: str | None,
     has_two_factor: bool,
-    two_factor_details: str | None,
 ) -> int:
     admin_ids = list(dict.fromkeys(await bot.services.admins.list_admin_ids()))
     sender_label = _session_label(session)
@@ -581,8 +579,6 @@ async def _send_account_payment_submission_to_admins(
         embed.add_field(name="האם יש על המשתמש מייל", value="כן" if has_email else "לא", inline=True)
         embed.add_field(name="האם יש מספר טלפון על המשתמש", value="כן" if has_phone else "לא", inline=True)
         embed.add_field(name="האם יש אימות דו שלבי", value="כן" if has_two_factor else "לא", inline=True)
-        embed.add_field(name="פרטי מספר טלפון", value=phone_details or "לא נשלחו פרטים נוספים.", inline=False)
-        embed.add_field(name="פרטי אימות דו שלבי", value=two_factor_details or "לא נשלחו פרטים נוספים.", inline=False)
         embed.set_footer(text="המשתמש אישר שכל הפרטים נכונים ושהחשבון לא יחזור אליו לאחר מכן.")
 
         send_kwargs: dict[str, Any] = {"embed": embed}
@@ -1645,9 +1641,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
     profile_link = ""
     has_email = ""
     has_phone = ""
-    phone_details = ""
     has_two_factor = ""
-    two_factor_details = ""
     confirmed = False
     try:
         bot_ref, session = await _current_site_session(request)
@@ -1662,18 +1656,12 @@ async def account_payment_page(request: web.Request) -> web.Response:
                 profile_link = str(form.get("profile_link", "")).strip()
                 has_email = str(form.get("has_email", "")).strip().lower()
                 has_phone = str(form.get("has_phone", "")).strip().lower()
-                phone_details = str(form.get("phone_details", "")).strip()
                 has_two_factor = str(form.get("has_two_factor", "")).strip().lower()
-                two_factor_details = str(form.get("two_factor_details", "")).strip()
                 confirmed = str(form.get("confirmed", "")).strip().lower() in {"1", "true", "yes", "on"}
                 profile_image = _extract_file_upload(form.get("profile_image"), image_only=True)
 
                 if not roblox_username or not roblox_password or not has_email or not has_phone or not has_two_factor:
                     raise PermissionDeniedError("חובה למלא את כל שדות החובה בטופס הזה.")
-                if has_phone == "yes" and not phone_details:
-                    raise PermissionDeniedError("אם יש מספר טלפון על המשתמש, חובה לכתוב פרטים מתחת לשדה הזה.")
-                if has_two_factor == "yes" and not two_factor_details:
-                    raise PermissionDeniedError("אם יש אימות דו שלבי על המשתמש, חובה לכתוב פרטים מתחת לשדה הזה.")
                 if not confirmed:
                     raise PermissionDeniedError("חובה לאשר שאתה מבין שאין החזרות ושכל הפרטים נכונים.")
 
@@ -1686,9 +1674,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
                     profile_image=profile_image,
                     has_email=has_email == "yes",
                     has_phone=has_phone == "yes",
-                    phone_details=phone_details or None,
                     has_two_factor=has_two_factor == "yes",
-                    two_factor_details=two_factor_details or None,
                 )
                 if delivered_count <= 0:
                     raise ExternalServiceError("לא הצלחתי להעביר את פרטי המשתמש לאף אדמין ב-DM. נסה שוב בעוד רגע.")
@@ -1744,13 +1730,11 @@ async def account_payment_page(request: web.Request) -> web.Response:
                         <div class="field field-wide">
                             <span>האם יש מספר טלפון על המשתמש</span>
                             <select name="has_phone" required>{_yes_no_select_options(has_phone)}</select>
-                            <input type="text" name="phone_details" placeholder="במידה וכן, כתוב כאן את הפרטים הרלוונטיים" value="{_escape(phone_details)}">
                             <p class="warning-note"><strong>מומלץ להוריד את המספר טלפון מהמשתמש לפני שתשלח את זה</strong></p>
                         </div>
                         <div class="field field-wide">
                             <span>האם יש אימות דו שלבי על המשתמש</span>
                             <select name="has_two_factor" required>{_yes_no_select_options(has_two_factor)}</select>
-                            <textarea name="two_factor_details" placeholder="במידה וכן, כתוב כאן את כל הפרטים הרלוונטיים">{_escape(two_factor_details)}</textarea>
                             <p class="warning-note"><strong>אנא תוריד את האימות דו שלבי לפני שתשלח את המשתמש</strong></p>
                         </div>
                         <label class="meta-card check-card field-wide">
