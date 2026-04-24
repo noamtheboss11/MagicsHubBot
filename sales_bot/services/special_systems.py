@@ -323,6 +323,11 @@ class SpecialSystemService:
         )
         return await self.get_order_request(order_id)
 
+    async def delete_order_request(self, order_id: int) -> SpecialOrderRequestRecord:
+        order = await self.get_order_request(order_id)
+        await self.database.execute("DELETE FROM special_order_requests WHERE id = ?", (order_id,))
+        return order
+
     async def _allocate_slug(self, title: str) -> str:
         base_slug = slugify(title)
         slug = base_slug

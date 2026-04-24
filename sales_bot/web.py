@@ -21,6 +21,7 @@ from sales_bot.web_portal import (
     admin_admins_page,
     admin_dashboard_page,
     admin_gamepasses_page,
+    admin_settings_page,
     admin_systems_page,
     custom_order_detail_page,
     custom_orders_list_page,
@@ -60,13 +61,14 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
-    app.router.add_get("/admin/custom-orders", custom_orders_list_page)
+    app.router.add_route("*", "/admin/custom-orders", custom_orders_list_page)
     app.router.add_route("*", "/admin/custom-orders/{order_id:\\d+}", custom_order_detail_page)
     app.router.add_route("*", "/admin/systems", admin_systems_page)
     app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)
+    app.router.add_route("*", "/admin/settings", admin_settings_page)
     app.router.add_route("*", "/admin/special-systems", special_system_compose_page)
     app.router.add_route("*", "/admin/special-systems/{special_system_id:\\d+}/edit", special_system_edit_page)
-    app.router.add_get("/admin/special-orders", special_orders_list_page)
+    app.router.add_route("*", "/admin/special-orders", special_orders_list_page)
     app.router.add_route("*", "/admin/special-orders/{order_id:\\d+}", special_order_detail_page)
     app.router.add_route("*", "/admin/polls/new", poll_create_page)
     app.router.add_route("*", "/admin/polls/{poll_id:\\d+}/edit", poll_edit_page)

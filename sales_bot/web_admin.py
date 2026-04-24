@@ -62,18 +62,101 @@ def admin_html_response(title: str, body: str) -> web.Response:
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>{html.escape(title)}</title>
+        <script>
+            (() => {{
+                const match = document.cookie.match(/(?:^|; )magic_admin_theme=([^;]+)/);
+                if (!match) {{
+                    return;
+                }}
+                const theme = decodeURIComponent(match[1] || '').trim().toLowerCase();
+                if (theme === 'default' || theme === 'dark' || theme === 'light') {{
+                    document.documentElement.dataset.theme = theme;
+                }}
+            }})();
+        </script>
         <style>
             :root {{
                 color-scheme: dark;
-                --bg: #07111f;
+                --bg-radial-1: rgba(85, 214, 190, 0.16);
+                --bg-radial-2: rgba(91, 143, 249, 0.18);
+                --bg-start: #03080f;
+                --bg-mid: #07111f;
+                --bg-end: #0d1e31;
                 --panel: rgba(12, 29, 49, 0.88);
                 --panel-border: rgba(133, 198, 255, 0.16);
+                --surface-card: rgba(9, 21, 36, 0.78);
+                --surface-soft: rgba(163, 190, 213, 0.1);
+                --surface-border: rgba(134, 167, 201, 0.15);
+                --surface-border-strong: rgba(134, 167, 201, 0.24);
+                --surface-hero-start: rgba(16, 37, 61, 0.92);
+                --surface-hero-end: rgba(8, 20, 35, 0.82);
                 --text: #f6fbff;
                 --muted: #a3bed5;
                 --accent: #55d6be;
                 --accent-strong: #26b89d;
+                --accent-soft: rgba(85, 214, 190, 0.12);
+                --accent-border: rgba(85, 214, 190, 0.28);
                 --danger: #ff8579;
+                --danger-soft: rgba(255, 133, 121, 0.12);
+                --danger-border: rgba(255, 133, 121, 0.26);
+                --warning-soft: rgba(255, 215, 125, 0.12);
+                --warning-border: rgba(255, 215, 125, 0.28);
+                --warning-text: #ffe8ae;
+                --success-soft: rgba(85, 214, 190, 0.12);
+                --success-border: rgba(85, 214, 190, 0.24);
+                --success-text: #d9fff8;
                 --field: rgba(8, 20, 35, 0.78);
+                --button-text: #041019;
+            }}
+            html[data-theme="dark"] {{
+                color-scheme: dark;
+                --bg-radial-1: rgba(90, 232, 205, 0.18);
+                --bg-radial-2: rgba(76, 126, 235, 0.22);
+                --bg-start: #02060c;
+                --bg-mid: #06101d;
+                --bg-end: #0a1726;
+                --panel: rgba(8, 20, 33, 0.92);
+                --panel-border: rgba(118, 180, 234, 0.18);
+                --field: rgba(5, 16, 28, 0.88);
+                --surface-card: rgba(6, 17, 29, 0.84);
+                --surface-soft: rgba(111, 146, 181, 0.09);
+                --surface-border: rgba(118, 180, 234, 0.16);
+                --surface-border-strong: rgba(118, 180, 234, 0.24);
+                --surface-hero-start: rgba(10, 28, 47, 0.96);
+                --surface-hero-end: rgba(4, 14, 24, 0.9);
+            }}
+            html[data-theme="light"] {{
+                color-scheme: light;
+                --bg-radial-1: rgba(85, 214, 190, 0.14);
+                --bg-radial-2: rgba(91, 143, 249, 0.16);
+                --bg-start: #eff7ff;
+                --bg-mid: #edf5fc;
+                --bg-end: #dfe9f6;
+                --panel: rgba(255, 255, 255, 0.9);
+                --panel-border: rgba(73, 116, 167, 0.16);
+                --surface-card: rgba(255, 255, 255, 0.82);
+                --surface-soft: rgba(34, 90, 148, 0.06);
+                --surface-border: rgba(73, 116, 167, 0.14);
+                --surface-border-strong: rgba(73, 116, 167, 0.22);
+                --surface-hero-start: rgba(240, 248, 255, 0.96);
+                --surface-hero-end: rgba(226, 238, 250, 0.92);
+                --text: #10233a;
+                --muted: #48627d;
+                --accent: #108c7c;
+                --accent-strong: #0d6f64;
+                --accent-soft: rgba(16, 140, 124, 0.1);
+                --accent-border: rgba(16, 140, 124, 0.2);
+                --danger: #b42318;
+                --danger-soft: rgba(180, 35, 24, 0.08);
+                --danger-border: rgba(180, 35, 24, 0.18);
+                --warning-soft: rgba(209, 138, 17, 0.1);
+                --warning-border: rgba(209, 138, 17, 0.18);
+                --warning-text: #8a5a09;
+                --success-soft: rgba(16, 140, 124, 0.08);
+                --success-border: rgba(16, 140, 124, 0.18);
+                --success-text: #0b5e55;
+                --field: rgba(248, 251, 255, 0.94);
+                --button-text: #f8fcff;
             }}
             * {{ box-sizing: border-box; }}
             body {{
@@ -82,21 +165,21 @@ def admin_html_response(title: str, body: str) -> web.Response:
                 font-family: Bahnschrift, "Trebuchet MS", "Aptos", sans-serif;
                 color: var(--text);
                 background:
-                    radial-gradient(circle at 20% 10%, rgba(85, 214, 190, 0.16), transparent 32%),
-                    radial-gradient(circle at 80% 0%, rgba(91, 143, 249, 0.18), transparent 30%),
-                    linear-gradient(160deg, #03080f 0%, #07111f 48%, #0d1e31 100%);
+                    radial-gradient(circle at 20% 10%, var(--bg-radial-1), transparent 32%),
+                    radial-gradient(circle at 80% 0%, var(--bg-radial-2), transparent 30%),
+                    linear-gradient(160deg, var(--bg-start) 0%, var(--bg-mid) 48%, var(--bg-end) 100%);
             }}
             main {{
-                width: min(100%, 1380px);
+                width: min(100%, 1680px);
                 margin: 0 auto;
-                padding: 36px 24px 72px;
+                padding: 28px 24px 72px;
             }}
             .shell {{
                 background: var(--panel);
                 border: 1px solid var(--panel-border);
-                border-radius: 26px;
-                padding: 36px;
-                box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+                border-radius: 30px;
+                padding: 40px;
+                box-shadow: 0 30px 80px rgba(0, 0, 0, 0.24);
                 backdrop-filter: blur(14px);
             }}
             .eyebrow {{
@@ -108,7 +191,7 @@ def admin_html_response(title: str, body: str) -> web.Response:
             }}
             h1 {{
                 margin: 0 0 10px;
-                font-size: clamp(2.2rem, 4vw, 3.35rem);
+                font-size: clamp(2.35rem, 4vw, 3.65rem);
                 line-height: 1.05;
             }}
             p, li, label, small {{
@@ -126,7 +209,7 @@ def admin_html_response(title: str, body: str) -> web.Response:
             .field-wide {{ grid-column: 1 / -1; }}
             input, select, textarea {{
                 width: 100%;
-                border: 1px solid rgba(140, 175, 211, 0.18);
+                border: 1px solid var(--surface-border);
                 border-radius: 14px;
                 background: var(--field);
                 color: var(--text);
@@ -142,37 +225,37 @@ def admin_html_response(title: str, body: str) -> web.Response:
                 border-radius: 999px;
                 padding: 13px 18px;
                 background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
-                color: #041019;
+                color: var(--button-text);
                 font: inherit;
                 font-weight: 700;
                 text-decoration: none;
                 cursor: pointer;
             }}
             .ghost-button {{
-                background: rgba(163, 190, 213, 0.12);
+                background: var(--surface-soft);
                 color: var(--text);
-                border: 1px solid rgba(163, 190, 213, 0.18);
+                border: 1px solid var(--surface-border);
             }}
             .danger {{ color: var(--danger); }}
             .notice {{
                 border-radius: 18px;
                 padding: 14px 16px;
                 margin-top: 18px;
-                background: rgba(255, 133, 121, 0.12);
-                border: 1px solid rgba(255, 133, 121, 0.26);
-                color: #ffd6d1;
+                background: var(--danger-soft);
+                border: 1px solid var(--danger-border);
+                color: var(--danger);
             }}
             .success {{
-                background: rgba(85, 214, 190, 0.12);
-                border-color: rgba(85, 214, 190, 0.24);
-                color: #d9fff8;
+                background: var(--success-soft);
+                border-color: var(--success-border);
+                color: var(--success-text);
             }}
             .meta-card {{
                 margin-top: 20px;
                 padding: 18px;
                 border-radius: 18px;
-                background: rgba(9, 21, 36, 0.78);
-                border: 1px solid rgba(134, 167, 201, 0.15);
+                background: var(--surface-card);
+                border: 1px solid var(--surface-border);
             }}
             @media (max-width: 700px) {{
                 .shell {{ padding: 22px; border-radius: 22px; }}

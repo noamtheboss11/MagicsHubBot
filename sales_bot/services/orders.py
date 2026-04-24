@@ -117,6 +117,11 @@ class OrderService:
         )
         return await self.get_request(order_id)
 
+    async def delete_request(self, order_id: int) -> OrderRequestRecord:
+        order = await self.get_request(order_id)
+        await self.database.execute("DELETE FROM order_requests WHERE id = ?", (order_id,))
+        return order
+
     def _normalize_payment_method(self, payment_method: str) -> str:
         raw_value = payment_method.strip()
         if not raw_value:

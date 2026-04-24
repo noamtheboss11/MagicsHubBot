@@ -41,56 +41,119 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+THEME_COOKIE_NAME = "magic_admin_theme"
+THEME_LABELS = {
+    "default": "ברירת מחדל",
+    "dark": "כהה",
+    "light": "בהיר",
+}
+
+ADMIN_NAV_SECTIONS = (
+    (
+        "ראשי",
+        (
+            {"label": "לוח ניהול", "href": "/admin", "matches": ("/admin",)},
+            {"label": "אדמינים", "href": "/admin/admins", "matches": ("/admin/admins",)},
+        ),
+    ),
+    (
+        "יצירה",
+        (
+            {"label": "מערכות", "href": "/admin/systems", "matches": ("/admin/systems",)},
+            {"label": "גיימפאסים", "href": "/admin/gamepasses", "matches": ("/admin/gamepasses",)},
+            {"label": "מערכות מיוחדות", "href": "/admin/special-systems", "matches": ("/admin/special-systems",)},
+        ),
+    ),
+    (
+        "הזמנות",
+        (
+            {"label": "הזמנות אישיות", "href": "/admin/custom-orders", "matches": ("/admin/custom-orders",)},
+            {"label": "הזמנות מיוחדות", "href": "/admin/special-orders", "matches": ("/admin/special-orders",)},
+        ),
+    ),
+    (
+        "אירועים",
+        (
+            {"label": "הגרלות", "href": "/admin/giveaways/new", "matches": ("/admin/giveaways",)},
+            {"label": "סקרים", "href": "/admin/polls/new", "matches": ("/admin/polls",)},
+            {"label": "אירועים", "href": "/admin/events/new", "matches": ("/admin/events",)},
+        ),
+    ),
+    (
+        "אחר",
+        (
+            {"label": "הגדרות", "href": "/admin/settings", "matches": ("/admin/settings",)},
+            {"label": "התנתק", "href": "/auth/logout", "matches": (), "danger": True},
+        ),
+    ),
+)
+
 
 PORTAL_STYLE = """
 <style>
-.portal-root { display: flex; flex-direction: column; gap: 18px; }
+.portal-root { display: flex; flex-direction: column; gap: 22px; }
 .top-strip { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
-.user-chip { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); max-width: 100%; }
+.user-chip { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 999px; background: var(--surface-soft); border: 1px solid var(--surface-border); max-width: 100%; }
 .user-chip div { min-width: 0; }
-.user-chip img { width: 40px; height: 40px; border-radius: 999px; object-fit: cover; }
-.admin-shell { gap: 26px; }
+.user-chip img { width: 44px; height: 44px; border-radius: 999px; object-fit: cover; border: 1px solid var(--surface-border); }
+.admin-shell { gap: 28px; }
 .admin-topbar { display: flex; justify-content: flex-end; direction: ltr; }
 .user-chip-profile { direction: rtl; }
-.admin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 292px; grid-template-areas: "main sidebar"; gap: 28px; align-items: start; direction: ltr; }
+.admin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 344px; grid-template-areas: "main sidebar"; gap: 34px; align-items: start; direction: ltr; }
 .admin-sidebar { grid-area: sidebar; direction: rtl; }
-.admin-sidebar-card { display: flex; flex-direction: column; gap: 16px; padding: 22px; border-radius: 24px; background: rgba(9, 21, 36, 0.78); border: 1px solid rgba(134, 167, 201, 0.15); position: sticky; top: 22px; }
+.admin-sidebar-card { display: flex; flex-direction: column; gap: 20px; padding: 24px; border-radius: 28px; background: var(--surface-card); border: 1px solid var(--surface-border); position: sticky; top: 22px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16); }
 .admin-sidebar-card p { margin: 0; }
-.admin-main { grid-area: main; min-width: 0; display: flex; flex-direction: column; gap: 22px; direction: rtl; }
-.admin-hero { padding: 28px; border-radius: 26px; background: linear-gradient(135deg, rgba(16, 37, 61, 0.92) 0%, rgba(8, 20, 35, 0.82) 100%); border: 1px solid rgba(134, 167, 201, 0.18); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+.sidebar-copy { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-copy .eyebrow { margin-bottom: 0; }
+.sidebar-sections { display: flex; flex-direction: column; gap: 18px; }
+.nav-section { display: flex; flex-direction: column; gap: 10px; }
+.nav-section-title { color: var(--muted); font-size: 0.78rem; letter-spacing: 0.18em; text-transform: uppercase; }
+.admin-main { grid-area: main; min-width: 0; display: flex; flex-direction: column; gap: 24px; direction: rtl; }
+.admin-hero { padding: 34px; border-radius: 30px; background: linear-gradient(135deg, var(--surface-hero-start) 0%, var(--surface-hero-end) 100%); border: 1px solid var(--surface-border-strong); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
 .admin-hero h1 { margin-bottom: 12px; }
 .admin-hero p:last-child { margin-bottom: 0; }
-.nav-links { display: flex; flex-direction: column; gap: 10px; }
-.nav-links a { padding: 14px 16px; border-radius: 18px; background: rgba(163, 190, 213, 0.12); border: 1px solid rgba(163, 190, 213, 0.18); text-decoration: none; color: var(--text); font-weight: 700; transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease; }
-.nav-links a:hover { background: rgba(85, 214, 190, 0.12); border-color: rgba(85, 214, 190, 0.28); transform: translateY(-1px); }
-.hero-grid, .stat-grid, .split-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-.card { padding: 22px; border-radius: 22px; background: rgba(9, 21, 36, 0.78); border: 1px solid rgba(134, 167, 201, 0.15); }
+.nav-links { display: flex; flex-direction: column; gap: 9px; }
+.nav-links a { padding: 15px 17px; border-radius: 18px; background: var(--surface-soft); border: 1px solid var(--surface-border); text-decoration: none; color: var(--text); font-weight: 700; transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, color 0.18s ease; }
+.nav-links a:hover { background: var(--accent-soft); border-color: var(--accent-border); transform: translateY(-1px); }
+.nav-links a.is-active { background: var(--accent-soft); border-color: var(--accent-border); box-shadow: inset 0 0 0 1px rgba(85, 214, 190, 0.18); }
+.nav-links a.danger-link { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
+.nav-links a.danger-link:hover { background: rgba(255, 133, 121, 0.22); border-color: rgba(255, 133, 121, 0.4); }
+.hero-grid, .stat-grid, .split-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.card { padding: 26px; border-radius: 26px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.12); }
 .card h2, .card h3 { margin-top: 0; margin-bottom: 10px; }
-.stat-value { font-size: 2.25rem; font-weight: 700; color: var(--text); }
-.table-wrap { overflow-x: auto; border-radius: 18px; border: 1px solid rgba(134, 167, 201, 0.15); background: rgba(9, 21, 36, 0.78); }
+.stat-value { font-size: 2.45rem; font-weight: 700; color: var(--text); }
+.table-wrap { overflow-x: auto; border-radius: 22px; border: 1px solid var(--surface-border); background: var(--surface-card); }
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: 14px 16px; text-align: right; border-bottom: 1px solid rgba(134, 167, 201, 0.12); vertical-align: top; }
+th, td { padding: 16px 18px; text-align: right; border-bottom: 1px solid var(--surface-border); vertical-align: top; }
 th { color: var(--text); font-size: 0.95rem; }
 td strong { color: var(--text); }
 .inline-form { display: inline-flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0; }
 .inline-form input, .inline-form select { width: auto; min-width: 120px; }
 .stack { display: flex; flex-direction: column; gap: 14px; }
-.badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: rgba(85, 214, 190, 0.12); border: 1px solid rgba(85, 214, 190, 0.22); color: #d9fff8; font-size: 0.9rem; }
-.badge.pending { background: rgba(255, 215, 125, 0.12); border-color: rgba(255, 215, 125, 0.28); color: #ffe8ae; }
-.badge.rejected { background: rgba(255, 133, 121, 0.12); border-color: rgba(255, 133, 121, 0.28); color: #ffd6d1; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--success-soft); border: 1px solid var(--success-border); color: var(--success-text); font-size: 0.9rem; }
+.badge.pending { background: var(--warning-soft); border-color: var(--warning-border); color: var(--warning-text); }
+.badge.rejected { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger); }
 .price-list { display: flex; flex-direction: column; gap: 10px; }
-.price-item { display: flex; justify-content: space-between; gap: 10px; padding: 12px 14px; border-radius: 14px; background: rgba(163, 190, 213, 0.08); border: 1px solid rgba(163, 190, 213, 0.12); }
+.price-item { display: flex; justify-content: space-between; gap: 10px; padding: 14px 16px; border-radius: 16px; background: var(--surface-soft); border: 1px solid var(--surface-border); }
 .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-.gallery img { width: 100%; height: 180px; object-fit: cover; border-radius: 16px; border: 1px solid rgba(134, 167, 201, 0.16); }
+.gallery img { width: 100%; height: 180px; object-fit: cover; border-radius: 18px; border: 1px solid var(--surface-border); }
 .check-card { display: flex; flex-direction: column; gap: 10px; }
 .check-line { display: flex; gap: 10px; align-items: center; color: var(--text); }
 .check-line input { width: auto; }
 .warning-note { color: #ff8579; font-weight: 700; }
 .muted { color: var(--muted); }
 .mono { font-family: Consolas, "Cascadia Mono", monospace; }
+.table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.table-actions form { margin: 0; }
+.profile-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr); gap: 18px; }
+.profile-hero { display: flex; gap: 18px; align-items: center; }
+.profile-avatar { width: 74px; height: 74px; border-radius: 24px; object-fit: cover; border: 1px solid var(--surface-border-strong); background: var(--surface-soft); }
+.settings-list { display: flex; flex-direction: column; gap: 12px; }
+.setting-hint { margin: 0; }
 @media (max-width: 900px) {
     .admin-layout { grid-template-columns: 1fr; grid-template-areas: "sidebar" "main"; }
     .admin-sidebar-card { position: static; }
+    .profile-grid { grid-template-columns: 1fr; }
     .nav-links { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
     .nav-links a { text-align: center; }
 }
@@ -100,6 +163,7 @@ td strong { color: var(--text); }
     .user-chip-profile { width: 100%; }
     .nav-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .nav-links a { display: flex; align-items: center; justify-content: center; min-height: 48px; }
+    .profile-hero { flex-direction: column; align-items: flex-start; }
     .price-item { flex-direction: column; }
 }
 </style>
@@ -117,6 +181,25 @@ def _page_response(title: str, body: str) -> web.Response:
     return admin_html_response(title, PORTAL_STYLE + body)
 
 
+def _theme_mode_from_request(request: web.Request) -> str:
+    theme_mode = str(request.cookies.get(THEME_COOKIE_NAME, "default") or "default").strip().lower()
+    if theme_mode not in THEME_LABELS:
+        return "default"
+    return theme_mode
+
+
+def _set_theme_cookie(response: web.StreamResponse, theme_mode: str, *, secure: bool) -> None:
+    response.set_cookie(
+        THEME_COOKIE_NAME,
+        theme_mode,
+        max_age=365 * 24 * 60 * 60,
+        httponly=False,
+        secure=secure,
+        samesite="Lax",
+        path="/",
+    )
+
+
 def _session_label(session: WebsiteSessionRecord) -> str:
     global_name = (session.global_name or "").strip()
     username = session.username.strip()
@@ -131,9 +214,49 @@ def _session_avatar(session: WebsiteSessionRecord) -> str | None:
     return f"https://cdn.discordapp.com/avatars/{session.discord_user_id}/{session.avatar_hash}.png?size=256"
 
 
+def _nav_item_is_active(current_path: str, matches: tuple[str, ...]) -> bool:
+    return any(current_path == value or current_path.startswith(f"{value}/") for value in matches)
+
+
+def _admin_nav_html(current_path: str) -> str:
+    sections: list[str] = []
+    for section_label, items in ADMIN_NAV_SECTIONS:
+        links: list[str] = []
+        for item in items:
+            classes: list[str] = []
+            matches = tuple(item.get("matches", ()))
+            if matches and _nav_item_is_active(current_path, matches):
+                classes.append("is-active")
+            if item.get("danger"):
+                classes.append("danger-link")
+            class_attr = f' class="{" ".join(classes)}"' if classes else ""
+            links.append(f'<a href="{_escape(item["href"])}"{class_attr}>{_escape(item["label"])}</a>')
+        sections.append(
+            f"""
+            <section class="nav-section">
+                <span class="nav-section-title">{_escape(section_label)}</span>
+                <div class="nav-links">{''.join(links)}</div>
+            </section>
+            """
+        )
+    return '<div class="sidebar-sections">' + ''.join(sections) + '</div>'
+
+
+def _admin_rank_label(bot: "SalesBot", user_id: int) -> str:
+    return "בעלים" if user_id == bot.settings.owner_user_id else "אדמין"
+
+
+def _theme_options(selected_theme: str) -> str:
+    return "\n".join(
+        f'<option value="{value}"{" selected" if value == selected_theme else ""}>{_escape(label)}</option>'
+        for value, label in THEME_LABELS.items()
+    )
+
+
 def _admin_shell(
     session: WebsiteSessionRecord,
     *,
+    current_path: str,
     title: str,
     intro: str,
     content: str,
@@ -154,21 +277,11 @@ def _admin_shell(
         <div class="admin-layout">
             <aside class="admin-sidebar">
                 <div class="admin-sidebar-card">
-                    <p class="eyebrow">ניווט מהיר</p>
-                    <p>מעבר בין כל כלי הניהול של האתר מתוך תפריט צד קבוע.</p>
-                    <div class="nav-links">
-                        <a href="/admin">לוח ניהול</a>
-                        <a href="/admin/admins">אדמינים</a>
-                        <a href="/admin/custom-orders">הזמנות אישיות</a>
-                        <a href="/admin/systems">מערכות</a>
-                        <a href="/admin/gamepasses">גיימפאסים</a>
-                        <a href="/admin/special-systems">מערכות מיוחדות</a>
-                        <a href="/admin/special-orders">הזמנות מיוחדות</a>
-                        <a href="/admin/polls/new">סקרים</a>
-                        <a href="/admin/giveaways/new">הגרלות</a>
-                        <a href="/admin/events/new">אירועים</a>
-                        <a href="/auth/logout">התנתק</a>
+                    <div class="sidebar-copy">
+                        <p class="eyebrow">ניווט מהיר</p>
+                        <p>חלוקה לפי אזורים כדי לעבור בין ניהול, יצירה, הזמנות והגדרות בלי שורת כפתורים צפופה.</p>
                     </div>
+                    {_admin_nav_html(current_path)}
                 </div>
             </aside>
             <div class="admin-main">
@@ -736,6 +849,90 @@ async def website_logout(request: web.Request) -> web.Response:
     return response
 
 
+async def admin_settings_page(request: web.Request) -> web.Response:
+    try:
+        bot, session = await _require_admin_session(request)
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip().lower()
+            if action != "save-theme":
+                raise PermissionDeniedError("הפעולה שנשלחה להגדרות לא תקינה.")
+            theme_mode = str(form.get("theme_mode", "default")).strip().lower()
+            if theme_mode not in THEME_LABELS:
+                raise PermissionDeniedError("מצב התצוגה שנבחר לא תקין.")
+            response = web.HTTPFound("/admin/settings?saved=theme")
+            _set_theme_cookie(response, theme_mode, secure=bot.settings.public_base_url.startswith("https://"))
+            return response
+
+        notice = "ערכת הנושא עודכנה בהצלחה." if request.query.get("saved") == "theme" else None
+        theme_mode = _theme_mode_from_request(request)
+        avatar_url = _session_avatar(session)
+        avatar_html = f'<img class="profile-avatar" src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else '<div class="profile-avatar"></div>'
+        try:
+            roblox_link = await bot.services.oauth.get_link(session.discord_user_id)
+        except SalesBotError:
+            roblox_link = None
+
+        if roblox_link is None:
+            roblox_profile = '<div class="price-item"><strong>Roblox</strong><span>אין חשבון Roblox מחובר כרגע.</span></div>'
+        else:
+            roblox_parts = [part for part in (roblox_link.roblox_display_name, roblox_link.roblox_username, roblox_link.roblox_sub) if part]
+            roblox_summary = " | ".join(roblox_parts) if roblox_parts else roblox_link.roblox_sub
+            profile_link_html = f'<a href="{_escape(roblox_link.profile_url)}" target="_blank" rel="noreferrer">פתח פרופיל</a>' if roblox_link.profile_url else 'אין קישור פרופיל'
+            roblox_profile = f"""
+            <div class="price-item"><strong>Roblox</strong><span>{_escape(roblox_summary)}</span></div>
+            <div class="price-item"><strong>קישור</strong><span>{profile_link_html}</span></div>
+            <div class="price-item"><strong>קושר בתאריך</strong><span>{_escape(roblox_link.linked_at)}</span></div>
+            """
+
+        content = f"""
+        {_notice_html(notice, success=True)}
+        <div class="profile-grid">
+            <div class="card stack">
+                <div class="profile-hero">
+                    {avatar_html}
+                    <div>
+                        <p class="eyebrow">הפרופיל שלך</p>
+                        <h2>{_escape(_session_label(session))}</h2>
+                        <p class="muted">פרטי Discord, חיבור Roblox קיים והדרגה של החשבון שמחובר כרגע לאתר.</p>
+                    </div>
+                </div>
+                <div class="price-list">
+                    <div class="price-item"><strong>Discord</strong><span>{_escape(_session_label(session))}</span></div>
+                    <div class="price-item"><strong>User ID</strong><span class="mono">{_escape(session.discord_user_id)}</span></div>
+                    <div class="price-item"><strong>דרגה</strong><span>{_escape(_admin_rank_label(bot, session.discord_user_id))}</span></div>
+                    <div class="price-item"><strong>סשן נוצר</strong><span>{_escape(session.created_at)}</span></div>
+                    <div class="price-item"><strong>נראה לאחרונה</strong><span>{_escape(session.last_seen_at)}</span></div>
+                    {roblox_profile}
+                </div>
+            </div>
+            <div class="card stack">
+                <div>
+                    <p class="eyebrow">מראה האתר</p>
+                    <h2>ערכת נושא</h2>
+                    <p class="setting-hint">ברירת מחדל שומרת על הסגנון הנוכחי, כהה מוסיפה יותר ניגודיות, ובהיר מתאים לעבודה ביום.</p>
+                </div>
+                <form method="post" class="settings-list">
+                    <input type="hidden" name="action" value="save-theme">
+                    <label class="field"><span>מצב תצוגה</span><select name="theme_mode">{_theme_options(theme_mode)}</select></label>
+                    <div class="actions"><button type="submit">שמור העדפה</button></div>
+                </form>
+                <div class="price-list">
+                    <div class="price-item"><strong>ברירת מחדל</strong><span>המראה הרגיל של האתר.</span></div>
+                    <div class="price-item"><strong>כהה</strong><span>רקע עמוק יותר וניגודיות חזקה יותר.</span></div>
+                    <div class="price-item"><strong>בהיר</strong><span>תצוגה בהירה לקריאה נוחה על מסכים מוארים.</span></div>
+                </div>
+            </div>
+        </div>
+        """
+        body = _admin_shell(session, current_path=request.path, title="הגדרות", intro="ניהול פרטי החשבון המחובר והעדפת התצוגה של האתר.", content=content)
+        return _page_response("הגדרות", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("הגדרות", str(exc), status=400)
+
+
 async def admin_dashboard_page(request: web.Request) -> web.Response:
     try:
         bot, session = await _require_admin_session(request)
@@ -773,6 +970,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
             <div class="card"><h3>מערכות מיוחדות</h3><p>פרסום מערכת מיוחדת עם כפתור קניה, תמונות, מחירים ושיטות תשלום.</p><div class="actions"><a class="link-button" href="/admin/special-systems">פתח</a></div></div>
             <div class="card"><h3>בקשות מיוחדות</h3><p>רשימת כל הבקשות, צפייה בפרטים, אישור או דחייה עם הודעה חזרה.</p><div class="actions"><a class="link-button" href="/admin/special-orders">פתח</a></div></div>
             <div class="card"><h3>כלי תוכן קיימים</h3><p>הפאנלים הקיימים של סקרים, הגרלות ואירועים נשארו זמינים גם דרך האתר.</p><div class="actions"><a class="link-button" href="/admin/polls/new">סקרים</a><a class="link-button ghost-button" href="/admin/giveaways/new">הגרלות</a><a class="link-button ghost-button" href="/admin/events/new">אירועים</a></div></div>
+            <div class="card"><h3>הגדרות אישיות</h3><p>פרטי החשבון המחובר, הדרגה שלך והעדפת ערכת הנושא של האתר.</p><div class="actions"><a class="link-button" href="/admin/settings">פתח</a></div></div>
         </div>
         """
         config_html = f"""
@@ -787,7 +985,7 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
             <p class="muted">הגדרות סביבה עדיין מנוהלות דרך השרת וה-ENV, אבל כל הכלים התפעוליים של הבוט פתוחים מכאן.</p>
         </div>
         """
-        body = _admin_shell(session, title="לוח ניהול ראשי", intro="כלי האתר מרוכזים כאן. כל דף משתמש באותם שירותים של פקודות הסלאש.", content=stats + quick_links + config_html)
+        body = _admin_shell(session, current_path=request.path, title="לוח ניהול ראשי", intro="כלי האתר מרוכזים כאן. כל דף משתמש באותם שירותים של פקודות הסלאש.", content=stats + quick_links + config_html)
         return _page_response("לוח ניהול", body)
     except web.HTTPException:
         raise
@@ -840,7 +1038,7 @@ async def admin_admins_page(request: web.Request) -> web.Response:
         </div>
         <div class="table-wrap"><table><thead><tr><th>משתמש</th><th>סוג</th><th>פעולה</th></tr></thead><tbody>{rows}</tbody></table></div>
         """
-        body = _admin_shell(session, title="ניהול אדמינים", intro="ניהול רשימת האדמינים של הבוט מתוך האתר.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="ניהול אדמינים", intro="ניהול רשימת האדמינים של הבוט מתוך האתר.", content=content)
         return _page_response("ניהול אדמינים", body)
     except web.HTTPException:
         raise
@@ -955,7 +1153,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
         </div>
         <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>PayPal</th><th>גיימפאס</th><th>פעולות</th></tr></thead><tbody>{system_rows}</tbody></table></div>
         """
-        body = _admin_shell(session, title="ניהול מערכות", intro="יצירה, עריכה, מחיקה ומתן/הסרה של מערכות דרך האתר.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="ניהול מערכות", intro="יצירה, עריכה, מחיקה ומתן/הסרה של מערכות דרך האתר.", content=content)
         return _page_response("ניהול מערכות", body)
     except web.HTTPException:
         raise
@@ -1107,7 +1305,7 @@ async def admin_gamepasses_page(request: web.Request) -> web.Response:
         </div>
         <div class="table-wrap"><table><thead><tr><th>גיימפאס</th><th>מחיר</th><th>למכירה</th><th>מערכת</th><th>שם תצוגה</th></tr></thead><tbody>{''.join(gamepass_rows)}</tbody></table></div>
         """
-        body = _admin_shell(session, title="ניהול גיימפאסים", intro="אותם כלים של owner gamepass commands, עכשיו דרך האתר.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="ניהול גיימפאסים", intro="אותם כלים של owner gamepass commands, עכשיו דרך האתר.", content=content)
         return _page_response("ניהול גיימפאסים", body)
     except web.HTTPException:
         raise
@@ -1214,7 +1412,7 @@ async def special_system_compose_page(request: web.Request) -> web.Response:
         </div>
         <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>סטטוס</th><th>שיטות תשלום</th><th>ערוץ</th><th>פעולות</th></tr></thead><tbody>{existing_rows}</tbody></table></div>
         """
-        body = _admin_shell(session, title="מערכות מיוחדות", intro="יצירת דף קניה מיוחד עם תמונות, מחירים וכפתור קניה יעודי.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="מערכות מיוחדות", intro="יצירת דף קניה מיוחד עם תמונות, מחירים וכפתור קניה יעודי.", content=content)
         return _page_response("מערכות מיוחדות", body)
     except web.HTTPException:
         raise
@@ -1309,7 +1507,7 @@ async def special_system_edit_page(request: web.Request) -> web.Response:
             </div>
         </div>
         """
-        body = _admin_shell(session, title=f"עריכת מערכת מיוחדת #{current_system.id}", intro="עריכת פרטי המערכת המיוחדת ופרסום מחדש של ההודעה הציבורית לפי הצורך.", content=content)
+        body = _admin_shell(session, current_path=request.path, title=f"עריכת מערכת מיוחדת #{current_system.id}", intro="עריכת פרטי המערכת המיוחדת ופרסום מחדש של ההודעה הציבורית לפי הצורך.", content=content)
         return _page_response(f"עריכת מערכת מיוחדת #{current_system.id}", body)
     except web.HTTPException:
         raise
@@ -1320,6 +1518,18 @@ async def special_system_edit_page(request: web.Request) -> web.Response:
 async def special_orders_list_page(request: web.Request) -> web.Response:
     try:
         bot, session = await _require_admin_session(request)
+        notice: str | None = None
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip().lower()
+            if action != "delete":
+                raise PermissionDeniedError("הפעולה שנשלחה לבקשות המיוחדות לא תקינה.")
+            order_id = _parse_positive_int(form.get("order_id"), "מזהה בקשה")
+            assert order_id is not None
+            deleted = await bot.services.special_systems.delete_order_request(order_id)
+            notice = f"בקשה מיוחדת #{deleted.id} נמחקה ממסד הנתונים."
+        elif str(request.query.get("deleted", "")).strip().isdigit():
+            notice = f"בקשה מיוחדת #{_escape(request.query.get('deleted'))} נמחקה ממסד הנתונים."
         status_filter = str(request.query.get("status", "all")).strip().lower()
         statuses = None if status_filter == "all" else (status_filter,)
         orders = await bot.services.special_systems.list_order_requests(statuses=statuses)
@@ -1332,16 +1542,19 @@ async def special_orders_list_page(request: web.Request) -> web.Response:
                 <td><span class="mono">{order.user_id}</span><br>{_escape(order.discord_name)}</td>
                 <td>{_escape(order.payment_method_label)}<br>{_escape(order.payment_price)}</td>
                 <td>{_status_badge(order.status)}</td>
-                <td><a class="link-button ghost-button" href="/admin/special-orders/{order.id}">פתח</a></td>
+                <td><div class="table-actions"><a class="link-button ghost-button" href="/admin/special-orders/{order.id}">פתח</a><form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit" class="ghost-button danger">מחק</button></form></div></td>
             </tr>
             """
             for order in orders
         )
+        if not rows:
+            rows = '<tr><td colspan="6">אין כרגע בקשות שתואמות למסנן שבחרת.</td></tr>'
         content = f"""
+        {_notice_html(notice, success=True)}
         <div class="actions"><a class="link-button ghost-button" href="/admin/special-orders?status=all">הכל</a><a class="link-button ghost-button" href="/admin/special-orders?status=pending">ממתינות</a><a class="link-button ghost-button" href="/admin/special-orders?status=accepted">התקבלו</a><a class="link-button ghost-button" href="/admin/special-orders?status=rejected">נדחו</a></div>
         <div class="table-wrap"><table><thead><tr><th>#</th><th>מערכת</th><th>לקוח</th><th>תשלום</th><th>סטטוס</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
         """
-        body = _admin_shell(session, title="בקשות למערכות מיוחדות", intro="ריכוז כל הבקשות שהגיעו דרך דפי הקניה המיוחדים.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="בקשות למערכות מיוחדות", intro="ריכוז כל הבקשות שהגיעו דרך דפי הקניה המיוחדים.", content=content)
         return _page_response("בקשות מיוחדות", body)
     except web.HTTPException:
         raise
@@ -1357,11 +1570,16 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
         order_id = int(request.match_info["order_id"])
         order = await bot.services.special_systems.get_order_request(order_id)
         special_system = await bot.services.special_systems.get_special_system(order.special_system_id)
-        if request.method == "POST" and order.status == "pending":
+        if request.method == "POST":
             form = await request.post()
             action = str(form.get("action", "")).strip()
+            if action == "delete":
+                deleted = await bot.services.special_systems.delete_order_request(order.id)
+                raise web.HTTPFound(f"/admin/special-orders?deleted={deleted.id}")
             if action not in {"accept", "reject"}:
                 raise PermissionDeniedError("הפעולה שנבחרה לא תקינה.")
+            if order.status != "pending":
+                raise PermissionDeniedError("אפשר לאשר או לדחות רק בקשה שעדיין ממתינה לטיפול.")
             admin_reply = str(form.get("admin_reply", "")).strip() or None
             order = await bot.services.special_systems.resolve_order_request(order.id, reviewer_id=session.discord_user_id, status="accepted" if action == "accept" else "rejected", admin_reply=admin_reply)
             try:
@@ -1380,9 +1598,9 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
         linked_roblox_label = "לא מחובר"
         if order.linked_roblox_sub:
             linked_roblox_label = " | ".join(part for part in (order.linked_roblox_display_name, order.linked_roblox_username, order.linked_roblox_sub) if part)
-        buttons_html = ''
+        buttons_html = '<button type="submit" name="action" value="delete" class="ghost-button danger">מחק בקשה</button>'
         if order.status == 'pending':
-            buttons_html = '<button type="submit" name="action" value="accept">אשר בקשה</button><button type="submit" name="action" value="reject" class="ghost-button danger">דחה בקשה</button>'
+            buttons_html = '<button type="submit" name="action" value="accept">אשר בקשה</button><button type="submit" name="action" value="reject" class="ghost-button danger">דחה בקשה</button>' + buttons_html
         content = f"""
         {_notice_html(notice, success=success)}
         <div class="split-grid">
@@ -1407,7 +1625,7 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
             </div>
         </div>
         """
-        body = _admin_shell(session, title=f"בקשה מיוחדת #{order.id}", intro="בדיקת כל הפרטים לפני אישור או דחייה של בקשת הקניה.", content=content)
+        body = _admin_shell(session, current_path=request.path, title=f"בקשה מיוחדת #{order.id}", intro="בדיקת כל הפרטים לפני אישור, דחייה או מחיקה של בקשת הקניה.", content=content)
         return _page_response(f"בקשה מיוחדת #{order.id}", body)
     except web.HTTPException:
         raise
@@ -1418,6 +1636,18 @@ async def special_order_detail_page(request: web.Request) -> web.Response:
 async def custom_orders_list_page(request: web.Request) -> web.Response:
     try:
         bot, session = await _require_admin_session(request)
+        notice: str | None = None
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip().lower()
+            if action != "delete":
+                raise PermissionDeniedError("הפעולה שנשלחה להזמנות האישיות לא תקינה.")
+            order_id = _parse_positive_int(form.get("order_id"), "מזהה הזמנה")
+            assert order_id is not None
+            deleted = await bot.services.orders.delete_request(order_id)
+            notice = f"הזמנה אישית #{deleted.id} נמחקה ממסד הנתונים."
+        elif str(request.query.get("deleted", "")).strip().isdigit():
+            notice = f"הזמנה אישית #{_escape(request.query.get('deleted'))} נמחקה ממסד הנתונים."
         status_filter = str(request.query.get("status", "all")).strip().lower()
         statuses = None if status_filter == "all" else (status_filter,)
         orders = await bot.services.orders.list_requests(statuses=statuses)
@@ -1431,7 +1661,7 @@ async def custom_orders_list_page(request: web.Request) -> web.Response:
                 <td>{_escape(order.payment_method)}<br>{_escape(order.offered_price)}</td>
                 <td>{_escape(order.roblox_username or 'לא צוין')}</td>
                 <td>{_status_badge(order.status)}</td>
-                <td><a class="link-button ghost-button" href="/admin/custom-orders/{order.id}">פתח</a></td>
+                <td><div class="table-actions"><a class="link-button ghost-button" href="/admin/custom-orders/{order.id}">פתח</a><form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit" class="ghost-button danger">מחק</button></form></div></td>
             </tr>
             """
             for order, requester_label in zip(orders, requester_labels)
@@ -1439,10 +1669,11 @@ async def custom_orders_list_page(request: web.Request) -> web.Response:
         if not rows:
             rows = '<tr><td colspan="7">אין כרגע הזמנות שתואמות למסנן שבחרת.</td></tr>'
         content = f"""
+        {_notice_html(notice, success=True)}
         <div class="actions"><a class="link-button ghost-button" href="/admin/custom-orders?status=all">הכל</a><a class="link-button ghost-button" href="/admin/custom-orders?status=pending">ממתינות</a><a class="link-button ghost-button" href="/admin/custom-orders?status=accepted">התקבלו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=completed">הושלמו</a><a class="link-button ghost-button" href="/admin/custom-orders?status=rejected">נדחו</a></div>
         <div class="table-wrap"><table><thead><tr><th>#</th><th>לקוח</th><th>מה הוזמן</th><th>תשלום</th><th>Roblox</th><th>סטטוס</th><th></th></tr></thead><tbody>{rows}</tbody></table></div>
         """
-        body = _admin_shell(session, title="הזמנות אישיות", intro="ריכוז כל ההזמנות האישיות שנשלחו דרך דף האתר החדש.", content=content)
+        body = _admin_shell(session, current_path=request.path, title="הזמנות אישיות", intro="ריכוז כל ההזמנות האישיות שנשלחו דרך דף האתר החדש.", content=content)
         return _page_response("הזמנות אישיות", body)
     except web.HTTPException:
         raise
@@ -1458,11 +1689,16 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
         order_id = int(request.match_info["order_id"])
         order = await bot.services.orders.get_request(order_id)
 
-        if request.method == "POST" and order.status not in {"rejected", "completed"}:
+        if request.method == "POST":
             form = await request.post()
             action = str(form.get("action", "")).strip().lower()
+            if action == "delete":
+                deleted = await bot.services.orders.delete_request(order.id)
+                raise web.HTTPFound(f"/admin/custom-orders?deleted={deleted.id}")
             if action not in {"accept", "reject", "complete"}:
                 raise PermissionDeniedError("הפעולה שנבחרה להזמנה האישית לא תקינה.")
+            if order.status in {"rejected", "completed"}:
+                raise PermissionDeniedError("אי אפשר לשנות הזמנה שכבר נדחתה או הושלמה.")
             if order.status == "pending" and action == "complete":
                 raise PermissionDeniedError("אפשר לסמן כהושלמה רק הזמנה שכבר התקבלה.")
 
@@ -1506,6 +1742,7 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
         if order.admin_reply and admin_note_label:
             review_meta += f'<div class="price-item"><strong>{_escape(admin_note_label)}</strong><span>{_escape(order.admin_reply)}</span></div>'
 
+        delete_button_html = '<button type="submit" name="action" value="delete" class="ghost-button danger">מחק הזמנה</button>'
         content = f"""
         {_notice_html(notice, success=success)}
         <div class="split-grid">
@@ -1527,12 +1764,12 @@ async def custom_order_detail_page(request: web.Request) -> web.Response:
                 <h2>טיפול בהזמנה</h2>
                 <form method="post">
                     <div class="grid"><label class="field field-wide"><span>הודעה ללקוח</span><textarea name="admin_reply" placeholder="הודעה שתישלח ללקוח אם תאשר, תדחה או תסמן כהושלמה.">{_escape(order.admin_reply or '')}</textarea></label></div>
-                    <div class="actions">{buttons_html}<a class="link-button ghost-button" href="/admin/custom-orders">חזרה לרשימה</a></div>
+                    <div class="actions">{buttons_html}{delete_button_html}<a class="link-button ghost-button" href="/admin/custom-orders">חזרה לרשימה</a></div>
                 </form>
             </div>
         </div>
         """
-        body = _admin_shell(session, title=f"הזמנה אישית #{order.id}", intro="בדיקה, אישור, דחייה או סיום של הזמנה אישית שנשלחה מהאתר.", content=content)
+        body = _admin_shell(session, current_path=request.path, title=f"הזמנה אישית #{order.id}", intro="בדיקה, אישור, דחייה, סיום או מחיקה של הזמנה אישית שנשלחה מהאתר.", content=content)
         return _page_response(f"הזמנה אישית #{order.id}", body)
     except web.HTTPException:
         raise
