@@ -221,6 +221,7 @@ Optional values:
 - `PAYPAL_ENV`
 - `PAYPAL_WEBHOOK_ID`
 - `PAYPAL_WEBHOOK_TOKEN`
+- `CHECKOUT_WEBHOOK_URL`
 - `WEB_HOST`
 - `WEB_PORT`
 - `PORT`
@@ -241,6 +242,8 @@ If `AI_TRAINING_CHANNEL_ID` is omitted, `/trainbot` keeps using `AI_SUPPORT_CHAN
 If `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are omitted, the website PayPal checkout stays disabled and the cart falls back to manual handling.
 
 If you enable the real website PayPal checkout, also set `PAYPAL_WEBHOOK_ID` and make sure the PayPal webhook points to `/webhooks/paypal` on your public domain.
+
+If you want website checkout orders to go to a Discord webhook instead of owner DMs, set `CHECKOUT_WEBHOOK_URL`.
 
 ## Render
 
@@ -269,6 +272,7 @@ If you want the real website PayPal checkout on Render, also set:
 - `PAYPAL_CLIENT_SECRET=<your PayPal app secret>`
 - `PAYPAL_ENV=sandbox` or `PAYPAL_ENV=live`
 - `PAYPAL_WEBHOOK_ID=<your PayPal webhook id>`
+- `CHECKOUT_WEBHOOK_URL=<your Discord webhook for checkout alerts>`
 
 The full setup walkthrough is in `docs/paypal-setup.md`.
 

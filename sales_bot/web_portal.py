@@ -351,6 +351,8 @@ PAYMENT_METHOD_LABELS = {
     "paypal": "PayPal",
 }
 
+WEBSITE_CARD_CHECKOUT_ENABLED = False
+
 PAYPAL_STATUS_LABELS = {
     "NOT-STARTED": "לא התחיל",
     "CREATED": "הזמנת PayPal נוצרה",
@@ -1463,7 +1465,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
     success = True
     code_text = ""
     note = ""
-    payment_method = "card"
+    payment_method = "paypal"
 
     try:
         bot, session = await _require_active_site_session(request)
@@ -1497,10 +1499,16 @@ async def website_checkout_page(request: web.Request) -> web.Response:
 
         if request.method == "POST":
             form = await request.post()
-            payment_method = str(form.get("payment_method", "card")).strip().lower() or "card"
+            payment_method = str(form.get("payment_method", "paypal")).strip().lower() or "paypal"
             code_text = str(form.get("discount_code", "")).strip().upper()
             note = str(form.get("note", "")).strip()
             action = str(form.get("action", "preview")).strip().lower()
+
+            if payment_method == "card" and not WEBSITE_CARD_CHECKOUT_ENABLED:
+                raise PermissionDeniedError("תשלום בכרטיס אשראי עדיין לא זמין באתר.")
+
+            if not WEBSITE_CARD_CHECKOUT_ENABLED and not bot.settings.paypal_checkout_enabled:
+                raise ConfigurationError("אין כרגע אמצעי תשלום פעיל באתר. הפעל את PayPal כדי לאפשר קופה.")
 
             if payment_method == "paypal" and not bot.settings.paypal_checkout_enabled:
                 raise ConfigurationError("PayPal עדיין לא מוגדר בשרת. עדכן PAYPAL_CLIENT_ID ו-PAYPAL_CLIENT_SECRET כדי להפעיל אותו.")
@@ -1538,6 +1546,19 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     discount_code_text=code_record.code if code_record is not None else None,
                 )
 
+                owner_lines = [
+                    f"משתמש: {_session_label(session)} ({session.discord_user_id})",
+                    f"מזהה הזמנה: #{order.id}",
+                    f"שיטת תשלום: {_checkout_method_label(order.payment_method)}",
+                    f"סטטוס: {ORDER_STATUS_LABELS.get(order.status, order.status)}",
+                    f"סכום ביניים: {_money_label(subtotal, currency)}",
+                ]
+                if code_record is not None:
+                    owner_lines.append(f"קוד הנחה: {code_record.code} (-{_money_label(code_discount_amount, currency)})")
+                owner_lines.append(f"סה\"כ: {_money_label(total_amount, currency)}")
+                if note:
+                    owner_lines.append(f"הערת לקוח: {note}")
+
                 if payment_method == "paypal":
                     order = await bot.services.payments.start_paypal_checkout(bot, order.id)
                     if code_record is not None:
@@ -1547,6 +1568,19 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                             order.id,
                             format(code_discount_amount, "f"),
                         )
+                    if order.paypal_order_id:
+                        owner_lines.append(f"PayPal Order ID: {order.paypal_order_id}")
+                    owner_lines.append("מערכות:")
+                    owner_lines.extend(
+                        f"- {row['item'].system.name}: {_money_label(row['effective_price'], currency)}"
+                        for row in pricing_rows
+                    )
+                    owner_lines.append(f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts")
+                    await bot.services.payments.send_checkout_admin_notification(
+                        bot,
+                        title="הגיעה הזמנת קופה חדשה מהאתר",
+                        body="\n".join(owner_lines),
+                    )
                     await bot.services.cart.clear_cart(session.discord_user_id)
                     raise web.HTTPFound(order.paypal_approval_url or f"/checkout/paypal/return?order_id={order.id}")
 
@@ -1559,6 +1593,18 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     )
 
                 await bot.services.cart.clear_cart(session.discord_user_id)
+
+                owner_lines.append("מערכות:")
+                owner_lines.extend(
+                    f"- {row['item'].system.name}: {_money_label(row['effective_price'], currency)}"
+                    for row in pricing_rows
+                )
+                owner_lines.append(f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts")
+                await bot.services.payments.send_checkout_admin_notification(
+                    bot,
+                    title="הגיעה הזמנת קופה חדשה מהאתר",
+                    body="\n".join(owner_lines),
+                )
 
                 summary_message = (
                     f"הזמנה #{order.id} נפתחה ונשמרה במערכת. הסכום הכולל הוא {_money_label(order.total_amount, order.currency)} "
@@ -1578,27 +1624,6 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     body=summary_message,
                     link_path="/inbox",
                 )
-
-                owner = bot.get_user(bot.settings.owner_user_id) or await bot.fetch_user(bot.settings.owner_user_id)
-                owner_dm = owner.dm_channel or await owner.create_dm()
-                owner_lines = "\n".join(
-                    f"- {row['item'].system.name}: {_money_label(row['effective_price'], currency)}"
-                    for row in pricing_rows
-                )
-                code_line = f"\nקוד הנחה: {code_record.code} (-{_money_label(code_discount_amount, currency)})" if code_record is not None else ""
-                try:
-                    await owner_dm.send(
-                        "הגיעה הזמנת קופה חדשה מהאתר\n"
-                        f"משתמש: {_session_label(session)} ({session.discord_user_id})\n"
-                        f"מזהה הזמנה: #{order.id}\n"
-                        f"שיטת תשלום: {_checkout_method_label(order.payment_method)}\n"
-                        f"סכום ביניים: {_money_label(subtotal, currency)}{code_line}\n"
-                        f"סה\"כ: {_money_label(total_amount, currency)}\n"
-                        f"מערכות:\n{owner_lines}\n"
-                        f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
-                    )
-                except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.warning("Failed to DM owner about checkout order %s", order.id, exc_info=True)
 
                 success_content = f'''
                 <div class="card stack">
@@ -1647,12 +1672,16 @@ async def website_checkout_page(request: web.Request) -> web.Response:
         else:
             code_notice = '<div class="meta-card"><strong>קוד הנחה:</strong> אפשר להזין קוד וללחוץ על בדיקה לפני שליחת הקופה.</div>'
 
-        payment_options_html = '<option value="card"' + (' selected' if payment_method == 'card' else '') + '>כרטיס אשראי</option>'
+        payment_options_html = '<option value="card" disabled>כרטיס אשראי (לא זמין כרגע)</option>'
+        submit_disabled_attr = ''
+        preview_disabled_attr = ''
         if bot.settings.paypal_checkout_enabled:
             payment_options_html += '<option value="paypal"' + (' selected' if payment_method == 'paypal' else '') + '>PayPal</option>'
-            payment_hint = 'אם תבחר PayPal, האתר ייצור הזמנה מאובטחת, יעביר אותך לאישור התשלום, ואחרי החזרה המערכות יימסרו אוטומטית.'
+            payment_hint = 'כרגע רק PayPal פעיל בקופה. כרטיס אשראי עדיין כבוי עד שתגדיר את המסלול הזה, ולכן התשלום יתבצע דרך PayPal בלבד.'
         else:
-            payment_hint = 'כרגע PayPal עדיין לא מוגדר בשרת הזה. אפשר לשלוח קופה ידנית בכרטיס אשראי עד שתחבר את פרטי PayPal לשרת.'
+            payment_hint = 'כרגע כרטיס אשראי כבוי ו-PayPal עדיין לא מוגדר בשרת הזה, לכן אי אפשר לפתוח קופה חדשה עד שתשלים את הגדרת PayPal.'
+            submit_disabled_attr = ' disabled'
+            preview_disabled_attr = ' disabled'
 
         content = f'''
         {_notice_html(notice, success=success)}
@@ -1663,7 +1692,7 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                     <label class="field"><span>שיטת תשלום</span><select name="payment_method">{payment_options_html}</select></label>
                     <label class="field"><span>קוד הנחה</span><input type="text" name="discount_code" maxlength="32" value="{_escape(code_text)}" placeholder="SUMMER10"></label>
                     <label class="field field-wide"><span>הערה לצוות</span><textarea name="note" placeholder="למשל: עדיף לפנות אליי קודם בדיסקורד">{_escape(note)}</textarea></label>
-                    <div class="actions"><button type="submit" name="action" value="preview" class="ghost-button">בדוק קוד וחשב מחדש</button><button type="submit" name="action" value="submit">שלח קופה</button></div>
+                    <div class="actions"><button type="submit" name="action" value="preview" class="ghost-button"{preview_disabled_attr}>בדוק קוד וחשב מחדש</button><button type="submit" name="action" value="submit"{submit_disabled_attr}>שלח קופה</button></div>
                 </form>
                 {code_notice}
                 <p class="muted">{_escape(payment_hint)}</p>

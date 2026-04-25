@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Iterable
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,9 @@ from sales_bot.models import CheckoutOrderItemRecord, CheckoutOrderRecord, Purch
 
 if TYPE_CHECKING:
     from sales_bot.bot import SalesBot
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PaymentService:
@@ -402,6 +406,35 @@ class PaymentService:
         await self.database.execute("DELETE FROM discount_code_redemptions WHERE order_id = ?", (order.id,))
         return await self.get_checkout_order(order.id)
 
+    async def send_checkout_admin_notification(
+        self,
+        bot: "SalesBot",
+        *,
+        title: str,
+        body: str,
+    ) -> bool:
+        message = f"**{title}**\n{body}"
+        if bot.settings.checkout_webhook_url and bot.http_session is not None:
+            try:
+                webhook = discord.Webhook.from_url(bot.settings.checkout_webhook_url, session=bot.http_session)
+                await webhook.send(
+                    message,
+                    username="Magic Studio's Orders",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            except (discord.HTTPException, ValueError):
+                LOGGER.warning("Failed to send checkout order message to Discord webhook", exc_info=True)
+
+        try:
+            owner = bot.get_user(bot.settings.owner_user_id) or await bot.fetch_user(bot.settings.owner_user_id)
+            owner_dm = owner.dm_channel or await owner.create_dm()
+            await owner_dm.send(message)
+            return True
+        except (discord.Forbidden, discord.HTTPException):
+            LOGGER.warning("Failed to deliver checkout order message to owner fallback DM", exc_info=True)
+            return False
+
     async def _paypal_access_token(self, bot: "SalesBot") -> str:
         if not bot.settings.paypal_checkout_enabled:
             raise ConfigurationError("PayPal checkout is not configured. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET first.")
@@ -633,13 +666,17 @@ class PaymentService:
         return None
 
     async def _notify_checkout_paid(self, bot: "SalesBot", order: CheckoutOrderRecord) -> None:
+        payment_method_label = self._payment_method_label(order.payment_method)
+        total_label = f"{order.total_amount} {order.currency.upper()}"
         message = (
-            f"תשלום PayPal עבור הזמנה #{order.id} התקבל בהצלחה. "
+            f"הזמנה #{order.id} הושלמה אוטומטית. "
+            f"שיטת התשלום: {payment_method_label}. "
+            f"הסכום שחויב: {total_label}. "
             f"המערכות נמסרו, והסטטוס נשמר במרכז ההתראות שלך."
         )
         await bot.services.notifications.create_notification(
             user_id=order.user_id,
-            title=f"PayPal הזמנה #{order.id} הושלמה",
+            title=f"הזמנה #{order.id} הושלמה",
             body=message,
             link_path="/inbox",
             kind="checkout",
@@ -648,10 +685,35 @@ class PaymentService:
             user = bot.get_user(order.user_id) or await bot.fetch_user(order.user_id)
             dm_channel = user.dm_channel or await user.create_dm()
             await dm_channel.send(
-                f"**PayPal הזמנה #{order.id} הושלמה**\n{message}\n{bot.settings.public_base_url}/inbox"
+                f"**הזמנה #{order.id} הושלמה**\n{message}\n"
+                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
+                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
+                f"{bot.settings.public_base_url}/inbox"
             )
         except (discord.Forbidden, discord.HTTPException):
-            return
+            LOGGER.warning("Failed to DM user about completed checkout order %s", order.id, exc_info=True)
+
+        await self.send_checkout_admin_notification(
+            bot,
+            title=f"הזמנה #{order.id} הושלמה אוטומטית",
+            body=(
+                f"לקוח: {order.user_id}\n"
+                f"שיטת תשלום: {payment_method_label}\n"
+                f"סכום: {total_label}\n"
+                f"PayPal Order ID: {order.paypal_order_id or '-'}\n"
+                f"PayPal Capture ID: {order.paypal_capture_id or '-'}\n"
+                f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
+            ),
+        )
+
+    @staticmethod
+    def _payment_method_label(method: str) -> str:
+        normalized = method.strip().lower()
+        if normalized == "paypal":
+            return "PayPal"
+        if normalized == "card":
+            return "כרטיס אשראי"
+        return method
 
     @staticmethod
     def _map_purchase(row: aiosqlite.Row) -> PurchaseRecord:

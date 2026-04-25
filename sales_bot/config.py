@@ -119,6 +119,7 @@ class Settings:
     paypal_environment: str
     paypal_webhook_id: str | None
     paypal_webhook_token: str | None
+    checkout_webhook_url: str | None
     web_host: str
     web_port: int
     sqlite_path: Path
@@ -216,6 +217,7 @@ class Settings:
             paypal_environment=_normalized_paypal_environment(os.getenv("PAYPAL_ENV")),
             paypal_webhook_id=_optional_env("PAYPAL_WEBHOOK_ID"),
             paypal_webhook_token=_optional_env("PAYPAL_WEBHOOK_TOKEN"),
+            checkout_webhook_url=_optional_env("CHECKOUT_WEBHOOK_URL"),
             web_host=os.getenv("WEB_HOST", "0.0.0.0"),
             web_port=_int_with_default("WEB_PORT", _int_with_default("PORT", 8080)),
             sqlite_path=sqlite_path,
