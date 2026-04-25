@@ -271,11 +271,11 @@ COMMAND_DETAIL_OVERRIDES: dict[str, dict[str, str]] = {
     },
     "addsystem": {
         "en": "Admin-only system creation. It stores the main file, optional image, optional PayPal link, and optional Roblox gamepass reference for delivery and purchase flows.",
-        "he": "יצירת מערכת לאדמינים בלבד. הפקודה שומרת את הקובץ הראשי, תמונה אופציונלית, קישור PayPal אופציונלי והפניה אופציונלית לגיימפאס Roblox לצורך מסירה ורכישה.",
+        "he": "יצירת מערכת לאדמינים בלבד. הפקודה שומרת את הקובץ הראשי, תמונה אופציונלית, קישור פייפאל אופציונלי והפניה אופציונלית לגיימפאס Roblox לצורך מסירה ורכישה.",
     },
     "editsystem": {
         "en": "Admin-only system edit flow. It opens the web edit panel where the name, description, file, image, PayPal link, and Roblox gamepass can be changed.",
-        "he": "זרימת עריכת מערכת לאדמינים בלבד. היא פותחת פאנל ווב שבו אפשר לשנות שם, תיאור, קובץ, תמונה, קישור PayPal וגיימפאס Roblox.",
+        "he": "זרימת עריכת מערכת לאדמינים בלבד. היא פותחת פאנל ווב שבו אפשר לשנות שם, תיאור, קובץ, תמונה, קישור פייפאל וגיימפאס Roblox.",
     },
     "sendsystem": {
         "en": "Admin-only direct delivery. It sends the chosen system to the target user in DM and records ownership.",

@@ -1,10 +1,10 @@
-# PayPal Setup Guide
+# פייפאל Setup Guide
 
-This project now supports a real PayPal-backed website checkout flow for cart orders. The backend creates the PayPal order, redirects the buyer to PayPal, captures the payment on the return route, verifies real PayPal webhooks, and then delivers the purchased systems automatically.
+This project now supports a real פייפאל-backed website checkout flow for cart orders. The backend creates the פייפאל order, redirects the buyer to פייפאל, captures the payment on the return route, verifies real פייפאל webhooks, and then delivers the purchased systems automatically.
 
 This guide covers:
 
-- how to create the PayPal developer app
+- how to create the פייפאל developer app
 - how to get the client ID and client secret
 - how to create and register the webhook
 - which environment variables to set
@@ -16,12 +16,12 @@ This guide covers:
 The website checkout flow now uses these routes and settings:
 
 - checkout page: `/checkout`
-- PayPal return URL: `/checkout/paypal/return`
-- PayPal cancel URL: `/checkout/paypal/cancel`
-- real PayPal webhook: `/webhooks/paypal`
+- פייפאל return URL: `/checkout/paypal/return`
+- פייפאל cancel URL: `/checkout/paypal/cancel`
+- real פייפאל webhook: `/webhooks/paypal`
 - legacy simulation webhook: `/webhooks/paypal/simulate`
 
-The per-system `paypal_link` field is now considered legacy and optional. The real website checkout uses:
+The per-system `פייפאל_link` field is now considered legacy and optional. The real website checkout uses:
 
 - `website_price`
 - `website_currency`
@@ -29,26 +29,26 @@ The per-system `paypal_link` field is now considered legacy and optional. The re
 - `is_for_sale`
 - `is_in_stock`
 
-If a system does not have a website price, it cannot go through the new PayPal cart checkout.
+If a system does not have a website price, it cannot go through the new פייפאל cart checkout.
 
-## Step 1: Create A PayPal Developer Account
+## Step 1: Create A פייפאל Developer Account
 
 1. Go to https://developer.paypal.com/
-2. Sign in with your PayPal account.
+2. Sign in with your פייפאל account.
 3. Open `Dashboard`.
 4. Make sure you can access both `Sandbox` and `Live` sections.
 
 Use `Sandbox` first. Do not start with live credentials.
 
-## Step 2: Create The PayPal App
+## Step 2: Create The פייפאל App
 
-1. In the PayPal developer dashboard, open `Apps & Credentials`.
+1. In the פייפאל developer dashboard, open `Apps & Credentials`.
 2. In `Sandbox`, click `Create App`.
 3. Give it a name like `Magic Studios Checkout`.
 4. Choose your sandbox business account.
 5. Save the app.
 
-After saving, PayPal will show:
+After saving, פייפאל will show:
 
 - `Client ID`
 - `Secret`

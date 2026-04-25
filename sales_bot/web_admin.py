@@ -1024,7 +1024,7 @@ def _render_system_form(
                 <input type="text" name="roblox_gamepass" value="{_escape(values['roblox_gamepass'])}">
             </label>
             <label class="field">
-                <span>מחיר באתר / לקופת PayPal</span>
+                <span>מחיר באתר / לקופת פייפאל</span>
                 <input type="text" name="website_price" inputmode="decimal" placeholder="19.99" value="{_escape(values['website_price'])}">
             </label>
             <label class="field">

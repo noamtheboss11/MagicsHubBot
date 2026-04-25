@@ -18,14 +18,14 @@ class PaymentsCog(commands.Cog):
         if await self.bot.services.blacklist.is_blacklisted(user_id):
             raise PermissionDeniedError("Blacklisted users cannot purchase or receive systems.")
 
-    @app_commands.command(name="buywithpaypal", description="בחירת מערכת עם קישור PayPal.")
+    @app_commands.command(name="buywithפייפאל", description="בחירת מערכת עם קישור פייפאל.")
     @linked_roblox_required()
     async def buywithpaypal(self, interaction: discord.Interaction) -> None:
         await self._validate_buyer(interaction.user.id)
 
         systems = await self.bot.services.systems.list_paypal_enabled_systems()
         if not systems:
-            await interaction.response.send_message("כרגע אין מערכות עם קישור PayPal מוגדר.", ephemeral=True)
+            await interaction.response.send_message("כרגע אין מערכות עם קישור פייפאל מוגדר.", ephemeral=True)
             return
 
         async def on_selected(
@@ -44,13 +44,13 @@ class PaymentsCog(commands.Cog):
             )
 
             embed = discord.Embed(title=f"תשלום עבור {selected_system.name}", color=discord.Color.green())
-            embed.description = "לחץ על כפתור PayPal למטה. אחרי שהתשלום יאושר דרך הוובהוק, המערכת תישלח אליך ב-DM אוטומטית."
+            embed.description = "לחץ על כפתור פייפאל למטה. אחרי שהתשלום יאושר דרך הוובהוק, המערכת תישלח אליך ב-DM אוטומטית."
             embed.add_field(name="מזהה רכישה", value=str(purchase.id), inline=False)
-            embed.add_field(name="קישור Webhook", value=f"{self.bot.settings.public_base_url}/webhooks/paypal/simulate", inline=False)
+            embed.add_field(name="קישור Webhook", value=f"{self.bot.settings.public_base_url}/webhooks/פייפאל/simulate", inline=False)
             link_view = discord.ui.View()
             link_view.add_item(
                 discord.ui.Button(
-                    label="פתח PayPal",
+                    label="פתח פייפאל",
                     style=discord.ButtonStyle.link,
                     url=selected_system.paypal_link,
                 )
@@ -60,17 +60,17 @@ class PaymentsCog(commands.Cog):
         view = PaginatedSelectView(
             actor_id=interaction.user.id,
             items=systems,
-            placeholder="בחר מערכת לרכישה ב-PayPal",
+            placeholder="בחר מערכת לרכישה ב-פייפאל",
             option_builder=lambda system: discord.SelectOption(
                 label=system.name[:100],
-                description=(system.description or "מערכת עם תשלום PayPal")[:100],
+                description=(system.description or "מערכת עם תשלום פייפאל")[:100],
                 value=str(system.id),
             ),
             value_getter=lambda system: str(system.id),
             on_selected=on_selected,
         )
         await interaction.response.send_message(
-            "בחר מערכת לרכישה דרך PayPal.",
+            "בחר מערכת לרכישה דרך פייפאל.",
             view=view,
             ephemeral=True,
         )
