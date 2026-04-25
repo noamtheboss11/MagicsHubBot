@@ -58,9 +58,7 @@ from sales_bot.web_portal import (
     website_logout,
     website_paypal_cancel_page,
     website_paypal_purchase_page,
-        website_paypal_cancel_page as website_פייפאל_cancel_page,
-        website_paypal_purchase_page as website_פייפאל_purchase_page,
-        website_paypal_return_page as website_פייפאל_return_page,
+        website_paypal_return_page,
 )
 
 if TYPE_CHECKING:
@@ -100,8 +98,8 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_post("/api/roblox/game/bootstrap", roblox_game_bootstrap)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
-    app.router.add_post("/webhooks/פייפאל/simulate", paypal_webhook)
-    app.router.add_post("/webhooks/פייפאל", paypal_webhook)
+        app.router.add_post("/webhooks/paypal/simulate", paypal_webhook)
+        app.router.add_post("/webhooks/paypal", paypal_webhook)
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
