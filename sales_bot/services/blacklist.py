@@ -18,13 +18,13 @@ class BlacklistService:
         )
         return row is not None
 
-    async def add_entry(self, user_id: int, display_label: str, actor_id: int) -> BlacklistEntry:
+    async def add_entry(self, user_id: int, display_label: str, reason: str, actor_id: int) -> BlacklistEntry:
         if await self.is_blacklisted(user_id):
             raise AlreadyExistsError("That user is already blacklisted.")
 
         await self.database.execute(
-            "INSERT INTO blacklist_entries (user_id, display_label, blacklisted_by) VALUES (?, ?, ?)",
-            (user_id, display_label, actor_id),
+            "INSERT INTO blacklist_entries (user_id, display_label, reason, blacklisted_by) VALUES (?, ?, ?, ?)",
+            (user_id, display_label, reason.strip(), actor_id),
         )
         return await self.get_entry(user_id)
 
@@ -49,6 +49,7 @@ class BlacklistService:
         await self.database.execute("DELETE FROM blacklist_entries WHERE user_id = ?", (user_id,))
 
     async def create_appeal(self, user_id: int, answer_one: str, answer_two: str) -> AppealRecord:
+        await self.cleanup_resolved_appeals()
         existing = await self.database.fetchone(
             "SELECT id FROM blacklist_appeals WHERE user_id = ? AND status = 'pending'",
             (user_id,),
@@ -72,6 +73,7 @@ class BlacklistService:
         return self._map_appeal(row)
 
     async def list_pending_appeals(self) -> list[AppealRecord]:
+        await self.cleanup_resolved_appeals()
         rows = await self.database.fetchall(
             "SELECT * FROM blacklist_appeals WHERE status = 'pending' ORDER BY submitted_at ASC"
         )
@@ -101,6 +103,27 @@ class BlacklistService:
         )
         return await self.get_appeal(appeal_id)
 
+    async def cleanup_resolved_appeals(self) -> None:
+        if self.database.database_url:
+            await self.database.execute(
+                """
+                DELETE FROM blacklist_appeals
+                WHERE status != 'pending'
+                  AND reviewed_at IS NOT NULL
+                  AND reviewed_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
+                """
+            )
+            return
+
+        await self.database.execute(
+            """
+            DELETE FROM blacklist_appeals
+            WHERE status != 'pending'
+              AND reviewed_at IS NOT NULL
+              AND reviewed_at < datetime('now', '-7 days')
+            """
+        )
+
     @staticmethod
     def build_display_label(user_id: int) -> str:
         return f"<@{user_id}> - {user_id}"
@@ -110,6 +133,7 @@ class BlacklistService:
         return BlacklistEntry(
             user_id=int(row["user_id"]),
             display_label=str(row["display_label"]),
+            reason=str(row["reason"] or ""),
             blacklisted_by=int(row["blacklisted_by"]) if row["blacklisted_by"] is not None else None,
             blacklisted_at=str(row["blacklisted_at"]),
         )

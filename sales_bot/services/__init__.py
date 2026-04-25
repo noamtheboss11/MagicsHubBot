@@ -5,9 +5,12 @@ from dataclasses import dataclass
 from sales_bot.services.ai_assistant import AIAssistantService
 from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
+from sales_bot.services.cart import CartService
 from sales_bot.services.delivery import DeliveryService
+from sales_bot.services.discount_codes import DiscountCodeService
 from sales_bot.services.discounts import DiscountService
 from sales_bot.services.engagement import EventService, GiveawayService, PollService
+from sales_bot.services.notifications import NotificationService
 from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
@@ -24,11 +27,14 @@ from sales_bot.services.web_auth import WebAuthService
 class ServiceContainer:
     admins: AdminService
     blacklist: BlacklistService
+    cart: CartService
+    discount_codes: DiscountCodeService
     discounts: DiscountService
     systems: SystemService
     ownership: OwnershipService
     orders: OrderService
     delivery: DeliveryService
+    notifications: NotificationService
     payments: PaymentService
     vouches: VouchService
     oauth: RobloxOAuthService

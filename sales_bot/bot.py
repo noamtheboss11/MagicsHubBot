@@ -17,9 +17,12 @@ from sales_bot.services import ServiceContainer
 from sales_bot.services.ai_assistant import AIAssistantService
 from sales_bot.services.admins import AdminService
 from sales_bot.services.blacklist import BlacklistService
+from sales_bot.services.cart import CartService
 from sales_bot.services.delivery import DeliveryService
+from sales_bot.services.discount_codes import DiscountCodeService
 from sales_bot.services.discounts import DiscountService
 from sales_bot.services.engagement import EventService, GiveawayService, PollService
+from sales_bot.services.notifications import NotificationService
 from sales_bot.services.oauth import RobloxOAuthService
 from sales_bot.services.orders import OrderService
 from sales_bot.services.ownership import OwnershipService
@@ -79,11 +82,14 @@ class SalesBot(commands.Bot):
         self.services = ServiceContainer(
             admins=AdminService(self.database, self.settings.owner_user_id),
             blacklist=BlacklistService(self.database),
+            cart=CartService(self.database),
+            discount_codes=DiscountCodeService(self.database),
             discounts=DiscountService(self.database),
             systems=SystemService(self.database, self.settings.data_dir / "systems"),
             ownership=OwnershipService(self.database),
             orders=OrderService(self.database),
             delivery=DeliveryService(),
+            notifications=NotificationService(self.database),
             payments=PaymentService(self.database),
             vouches=VouchService(self.database),
             oauth=RobloxOAuthService(self.database, self.settings),

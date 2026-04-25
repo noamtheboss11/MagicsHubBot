@@ -94,6 +94,11 @@ class DiscountService:
                 s.image_path AS system_image_path,
                 s.paypal_link AS system_paypal_link,
                 s.roblox_gamepass_id AS system_roblox_gamepass_id,
+                s.is_visible_on_website AS system_is_visible_on_website,
+                s.is_for_sale AS system_is_for_sale,
+                s.is_in_stock AS system_is_in_stock,
+                s.website_price AS system_website_price,
+                s.website_currency AS system_website_currency,
                 s.created_by AS system_created_by,
                 s.created_at AS system_created_at
             FROM system_discounts sd
@@ -123,6 +128,11 @@ class DiscountService:
                 s.image_path AS system_image_path,
                 s.paypal_link AS system_paypal_link,
                 s.roblox_gamepass_id AS system_roblox_gamepass_id,
+                s.is_visible_on_website AS system_is_visible_on_website,
+                s.is_for_sale AS system_is_for_sale,
+                s.is_in_stock AS system_is_in_stock,
+                s.website_price AS system_website_price,
+                s.website_currency AS system_website_currency,
                 s.created_by AS system_created_by,
                 s.created_at AS system_created_at
             FROM system_discounts sd
@@ -152,6 +162,11 @@ class DiscountService:
                 s.image_path AS system_image_path,
                 s.paypal_link AS system_paypal_link,
                 s.roblox_gamepass_id AS system_roblox_gamepass_id,
+                s.is_visible_on_website AS system_is_visible_on_website,
+                s.is_for_sale AS system_is_for_sale,
+                s.is_in_stock AS system_is_in_stock,
+                s.website_price AS system_website_price,
+                s.website_currency AS system_website_currency,
                 s.created_by AS system_created_by,
                 s.created_at AS system_created_at
             FROM system_discounts sd
@@ -177,6 +192,11 @@ class DiscountService:
             image_path=str(row["system_image_path"]) if row["system_image_path"] else None,
             paypal_link=str(row["system_paypal_link"]) if row["system_paypal_link"] else None,
             roblox_gamepass_id=str(row["system_roblox_gamepass_id"]) if row["system_roblox_gamepass_id"] else None,
+            is_visible_on_website=bool(row["system_is_visible_on_website"]),
+            is_for_sale=bool(row["system_is_for_sale"]),
+            is_in_stock=bool(row["system_is_in_stock"]),
+            website_price=str(row["system_website_price"]) if row["system_website_price"] else None,
+            website_currency=str(row["system_website_currency"] or "USD").upper(),
             created_by=int(row["system_created_by"]) if row["system_created_by"] is not None else None,
             created_at=str(row["system_created_at"]),
         )

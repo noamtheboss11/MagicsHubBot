@@ -80,7 +80,6 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - `/requestblacklistremove`
 - `/buywithpaypal`
 - `/buywithrobux`
-- `/getsystem`
 - `/sendorderpanel`
 - `/checksystems`
 - `/revokesystem`
@@ -119,6 +118,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - System deliveries go through DMs, send embeds plus attached files, and are logged so blacklist and revoke actions can delete prior bot-sent system messages.
 - Blacklist appeals use a modal and a persistent owner-DM button view that survives bot restarts.
 - PayPal purchases create a pending purchase record and are completed by a webhook simulation endpoint that triggers automatic delivery.
+- The website now includes a multi-system cart, manual card/PayPal checkout queue, redeemable discount codes, and a user inbox for site notifications and order updates.
 - Ownership is tracked in `user_systems` and can be granted, checked, or revoked.
 - Admins can save transferable ownership snapshots, transfer supported systems between Discord users without duplication, and permanently block old Roblox reclaims after transfer.
 - Vouches use a preview flow with edit support and publish to the configured vouch channel.
@@ -131,6 +131,7 @@ Discord slash command names must be lowercase, so the bot exposes these command 
 - Special-system listings support multiple uploaded images, per-method pricing for PayPal / Bit / Robux / 2014 users / JailBreak items, and a public Hebrew web order form behind Discord website login.
 - New special-order requests are sent to the configured owner in DM, stored in an admin-only website queue, and can be accepted or rejected from the site with a DM response back to the buyer.
 - Published special systems can now be edited, republished, activated again, or deactivated from the admin website without changing their public slug.
+- Store admins can create reusable discount codes, review queued website checkout orders, and send inbox notifications to any Discord user by ID.
 - After Roblox linking succeeds, the bot can sync the member nickname to `username (display name)` and assign the configured Roblox verified role in the primary guild.
 - Admins can inspect another member's linked Roblox account with `/checkroblox`, including live Roblox profile data and the systems owned by that Discord user.
 - `/getsystem` checks the linked Roblox account against the configured system gamepass using Roblox inventory ownership before delivering the system.
@@ -156,6 +157,12 @@ SQLite schema lives in `sales_bot/sql/schema.sql` and creates these primary tabl
 - `blacklist_entries`
 - `blacklist_appeals`
 - `paypal_purchases`
+- `website_cart_items`
+- `website_checkout_orders`
+- `website_checkout_order_items`
+- `discount_codes`
+- `discount_code_redemptions`
+- `website_notifications`
 - `vouches`
 - `temp_saved_systems`
 - `transfer_locks`

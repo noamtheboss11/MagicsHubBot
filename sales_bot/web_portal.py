@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import mimetypes
 import logging
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
@@ -17,6 +19,12 @@ from sales_bot.exceptions import (
     SalesBotError,
 )
 from sales_bot.models import (
+    BlacklistEntry,
+    CartItemRecord,
+    CheckoutOrderItemRecord,
+    CheckoutOrderRecord,
+    DiscountCodeRecord,
+    NotificationRecord,
     OrderRequestRecord,
     RobloxGamePassRecord,
     RobloxLinkRecord,
@@ -26,6 +34,7 @@ from sales_bot.models import (
     SystemRecord,
     WebsiteSessionRecord,
 )
+from sales_bot.ui.appeals import AppealDecisionView
 from sales_bot.web_admin import (
     _error_response,
     _escape,
@@ -67,8 +76,16 @@ ADMIN_NAV_SECTIONS = (
     (
         "הזמנות",
         (
+            {"label": "קופות אתר", "href": "/admin/checkouts", "matches": ("/admin/checkouts",)},
             {"label": "הזמנות אישיות", "href": "/admin/custom-orders", "matches": ("/admin/custom-orders",)},
             {"label": "הזמנות מיוחדות", "href": "/admin/special-orders", "matches": ("/admin/special-orders",)},
+        ),
+    ),
+    (
+        "לקוחות",
+        (
+            {"label": "קודי הנחה", "href": "/admin/discount-codes", "matches": ("/admin/discount-codes",)},
+            {"label": "התראות", "href": "/admin/notifications", "matches": ("/admin/notifications",)},
         ),
     ),
     (
@@ -88,6 +105,16 @@ ADMIN_NAV_SECTIONS = (
     ),
 )
 
+PUBLIC_NAV_ITEMS = (
+    ("דף הבית", "/"),
+    ("מערכות", "/systems"),
+    ("עגלה", "/cart"),
+    ("התראות", "/inbox"),
+    ("מערכות מיוחדות", "/special-systems"),
+    ("דירוגים", "/vouches"),
+    ("מידע", "/info"),
+)
+
 
 PORTAL_STYLE = """
 <style>
@@ -96,6 +123,15 @@ PORTAL_STYLE = """
 .user-chip { display: inline-flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 18px; background: var(--surface-strong); border: 1px solid var(--surface-border); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); max-width: 100%; }
 .user-chip div { min-width: 0; }
 .user-chip img { width: 42px; height: 42px; border-radius: 14px; object-fit: cover; border: 1px solid var(--surface-border-strong); }
+.account-link { color: inherit; text-decoration: none; }
+.account-link:hover { color: inherit; }
+.public-shell-top { display: flex; flex-direction: column; gap: 16px; }
+.public-shell-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.public-heading { display: flex; flex-direction: column; gap: 10px; }
+.public-site-nav { display: inline-flex; align-items: center; gap: 8px; padding: 8px; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-card); box-shadow: var(--shadow-md); }
+.public-site-nav a { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border-radius: 999px; color: var(--muted); text-decoration: none; font-weight: 700; transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease; }
+.public-site-nav a:hover { color: var(--text); background: var(--surface-soft); transform: translateY(-1px); }
+.public-site-nav a.is-active { color: var(--button-text); background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%); box-shadow: 0 14px 24px rgba(19, 143, 208, 0.2); }
 .admin-shell { gap: 22px; }
 .admin-topbar { display: flex; justify-content: flex-start; direction: ltr; }
 .user-chip-profile { direction: rtl; }
@@ -139,6 +175,28 @@ td strong { color: var(--text); }
 .price-item { display: flex; justify-content: space-between; gap: 10px; padding: 14px 16px; border-radius: 18px; background: var(--surface-strong); border: 1px solid var(--surface-border); }
 .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
 .gallery img { width: 100%; height: 180px; object-fit: cover; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.catalog-card { display: flex; flex-direction: column; gap: 16px; padding: 22px; border-radius: 22px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
+.catalog-media { width: 100%; aspect-ratio: 16 / 10; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); object-fit: cover; }
+.catalog-placeholder { display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--muted); }
+.catalog-meta { display: flex; flex-direction: column; gap: 10px; }
+.catalog-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.catalog-badge { display: inline-flex; align-items: center; padding: 7px 11px; border-radius: 999px; background: var(--surface-strong); border: 1px solid var(--surface-border); color: var(--text); font-size: 0.88rem; }
+.catalog-badge.warn { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-soft); }
+.hero-banner { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.75fr); gap: 18px; }
+.hero-banner-card { padding: 28px 30px; border-radius: 24px; background: linear-gradient(135deg, var(--surface-hero-start) 0%, var(--surface-hero-end) 100%); border: 1px solid var(--surface-border-strong); }
+.hero-side-card { padding: 24px; border-radius: 24px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
+.profile-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.summary-tile { padding: 18px 20px; border-radius: 18px; background: var(--surface-strong); border: 1px solid var(--surface-border); }
+.summary-tile strong { display: block; font-size: 1.6rem; margin-bottom: 6px; }
+.system-detail-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr); gap: 18px; }
+.system-preview { padding: 22px; border-radius: 22px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
+.system-preview img { width: 100%; max-height: 360px; object-fit: cover; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); }
+.system-download-list { display: flex; flex-direction: column; gap: 12px; }
+.empty-card { padding: 26px; border-radius: 22px; background: var(--surface-card); border: 1px dashed var(--surface-border-strong); text-align: center; }
+.vouch-list { display: flex; flex-direction: column; gap: 14px; }
+.vouch-card { padding: 20px 22px; border-radius: 22px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
+.stars { color: #ffd778; font-size: 1.05rem; letter-spacing: 0.12em; }
 .check-card { display: flex; flex-direction: column; gap: 10px; }
 .check-line { display: flex; gap: 10px; align-items: center; color: var(--text); }
 .check-line input { width: auto; }
@@ -156,9 +214,12 @@ td strong { color: var(--text); }
     .admin-sidebar-card { position: static; }
     .profile-grid { grid-template-columns: 1fr; }
     .sidebar-copy { flex-basis: 100%; max-width: none; }
+    .hero-banner, .system-detail-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
     .top-strip { align-items: stretch; }
+    .public-shell-actions { align-items: stretch; }
+    .public-site-nav { width: 100%; justify-content: space-between; overflow-x: auto; }
     .admin-topbar { justify-content: stretch; }
     .user-chip-profile { width: 100%; }
     .admin-sidebar-card { padding: 16px; }
@@ -178,6 +239,12 @@ ORDER_STATUS_LABELS = {
     "accepted": "התקבלה",
     "rejected": "נדחתה",
     "completed": "הושלמה",
+    "cancelled": "בוטלה",
+}
+
+PAYMENT_METHOD_LABELS = {
+    "card": "כרטיס אשראי",
+    "paypal": "PayPal",
 }
 
 
@@ -270,13 +337,13 @@ def _admin_shell(
     return f"""
     <div class="portal-root admin-shell" dir="rtl">
         <div class="admin-topbar">
-            <div class="user-chip user-chip-profile">
+            <a class="user-chip user-chip-profile account-link" href="/profile">
                 {avatar_html}
                 <div>
                     <strong>{_escape(_session_label(session))}</strong><br>
                     <span class="muted mono">{_escape(session.discord_user_id)}</span>
                 </div>
-            </div>
+            </a>
         </div>
         <div class="admin-layout">
             <aside class="admin-sidebar">
@@ -301,38 +368,59 @@ def _admin_shell(
     """
 
 
+def _public_nav_html(current_path: str) -> str:
+    links: list[str] = []
+    for label, href in PUBLIC_NAV_ITEMS:
+        is_active = current_path == href or (href != "/" and current_path.startswith(f"{href}/"))
+        class_attr = ' class="is-active"' if is_active else ""
+        links.append(f'<a href="{_escape(href)}"{class_attr}>{_escape(label)}</a>')
+    return '<nav class="public-site-nav">' + ''.join(links) + '</nav>'
+
+
 def _public_shell(
     session: WebsiteSessionRecord | None,
     *,
+    current_path: str,
     title: str,
     intro: str,
     login_path: str,
     section_label: str = "מערכות מיוחדות",
     content: str,
+    show_nav: bool = True,
 ) -> str:
     account_block = ""
     if session is None:
         account_block = (
             f'<div class="actions"><a class="link-button" href="/auth/discord/login?next={_escape(login_path)}">'
-            "התחברות עם Discord"
+            "התחברות עם דיסקורד"
             "</a></div>"
         )
     else:
+        avatar_url = _session_avatar(session)
+        avatar_html = f'<img src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else ""
         account_block = f"""
-        <div class="user-chip">
-            <strong>{_escape(_session_label(session))}</strong>
-            <span class="muted mono">{_escape(session.discord_user_id)}</span>
-        </div>
+        <a class="user-chip account-link" href="/profile">
+            {avatar_html}
+            <div>
+                <strong>{_escape(_session_label(session))}</strong><br>
+                <span class="muted mono">{_escape(session.discord_user_id)}</span>
+            </div>
+        </a>
         """
     return f"""
     <div class="portal-root" dir="rtl">
-        <div class="top-strip">
-            <div>
+        <div class="public-shell-top">
+            <div class="public-shell-actions">
+                {_public_nav_html(current_path) if show_nav else ''}
+                {account_block}
+            </div>
+            <div class="top-strip">
+                <div class="public-heading">
                 <p class="eyebrow">{_escape(section_label)}</p>
                 <h1>{_escape(title)}</h1>
                 <p>{_escape(intro)}</p>
+                </div>
             </div>
-            {account_block}
         </div>
         {content}
     </div>
@@ -344,6 +432,92 @@ def _notice_html(message: str | None, *, success: bool) -> str:
         return ""
     classes = "notice success" if success else "notice"
     return f'<div class="{classes}">{_escape(message)}</div>'
+
+
+def _money_decimal(raw_value: str | None) -> Decimal:
+    try:
+        return Decimal(str(raw_value or "0")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return Decimal("0.00")
+
+
+def _money_label(amount: Decimal | str, currency: str) -> str:
+    parsed = amount if isinstance(amount, Decimal) else _money_decimal(amount)
+    return f"{format(parsed.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), 'f')} {currency.upper()}"
+
+
+def _checkout_method_label(method: str) -> str:
+    return PAYMENT_METHOD_LABELS.get(method.strip().lower(), method)
+
+
+def _cart_currency(items: list[CartItemRecord]) -> str:
+    if not items:
+        return "USD"
+    currencies = {item.system.website_currency.upper() for item in items if item.system.website_currency}
+    if len(currencies) > 1:
+        raise PermissionDeniedError("כרגע אי אפשר לבצע קופה אחת למערכות עם כמה מטבעות שונים.")
+    return next(iter(currencies), "USD")
+
+
+def _effective_system_price(system: SystemRecord, personal_discount_percent: int | None = None) -> Decimal:
+    base_price = _money_decimal(system.website_price)
+    if personal_discount_percent is None or personal_discount_percent <= 0:
+        return base_price
+    discounted = base_price * (Decimal("100") - Decimal(personal_discount_percent)) / Decimal("100")
+    return discounted.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _build_cart_pricing(
+    items: list[CartItemRecord],
+    *,
+    personal_discounts: dict[int, int] | None = None,
+) -> tuple[list[dict[str, Any]], Decimal, str]:
+    pricing_rows: list[dict[str, Any]] = []
+    subtotal = Decimal("0.00")
+    currency = _cart_currency(items)
+    discount_map = personal_discounts or {}
+    for item in items:
+        percent = discount_map.get(item.system.id)
+        effective_price = _effective_system_price(item.system, percent)
+        pricing_rows.append(
+            {
+                "item": item,
+                "personal_discount_percent": percent,
+                "base_price": _money_decimal(item.system.website_price),
+                "effective_price": effective_price,
+            }
+        )
+        subtotal += effective_price
+    return pricing_rows, subtotal.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), currency
+
+
+def _checkout_items_html(items: list[CheckoutOrderItemRecord], currency: str) -> str:
+    if not items:
+        return '<div class="empty-card"><p>אין מערכות שמחוברות להזמנה הזאת.</p></div>'
+    return ''.join(
+        f'<div class="price-item"><strong>{_escape(item.system_name)}</strong><span>{_escape(_money_label(item.line_total, currency))}</span></div>'
+        for item in items
+    )
+
+
+async def _send_optional_user_dm(
+    bot: "SalesBot",
+    *,
+    user_id: int,
+    title: str,
+    body: str,
+    link_path: str | None = None,
+) -> bool:
+    try:
+        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        dm_channel = user.dm_channel or await user.create_dm()
+        extra_line = ""
+        if link_path:
+            extra_line = f"\n{bot.settings.public_base_url}{link_path}"
+        await dm_channel.send(f"**{title}**\n{body}{extra_line}")
+        return True
+    except (discord.HTTPException, discord.Forbidden):
+        return False
 
 
 def _status_badge(status: str) -> str:
@@ -384,6 +558,26 @@ async def _require_admin_session(request: web.Request) -> tuple["SalesBot", Webs
     bot, session = await _require_site_session(request)
     if not await bot.services.admins.is_admin(session.discord_user_id):
         raise PermissionDeniedError("רק אדמינים של הבוט יכולים לפתוח את האתר הזה.")
+    return bot, session
+
+
+async def _blacklist_entry_optional(bot: "SalesBot", user_id: int) -> BlacklistEntry | None:
+    try:
+        return await bot.services.blacklist.get_entry(user_id)
+    except NotFoundError:
+        return None
+
+
+async def _ensure_site_session_allowed(bot: "SalesBot", session: WebsiteSessionRecord, *, allow_blacklisted: bool = False) -> BlacklistEntry | None:
+    entry = await _blacklist_entry_optional(bot, session.discord_user_id)
+    if entry is not None and not allow_blacklisted:
+        raise web.HTTPFound("/blacklist-appeal")
+    return entry
+
+
+async def _require_active_site_session(request: web.Request) -> tuple["SalesBot", WebsiteSessionRecord]:
+    bot, session = await _require_site_session(request)
+    await _ensure_site_session_allowed(bot, session)
     return bot, session
 
 
@@ -511,6 +705,1019 @@ def _yes_no_select_options(selected_value: str | None = None) -> str:
 
 def _special_system_url(bot: "SalesBot", special_system: SpecialSystemRecord) -> str:
     return f"{bot.settings.public_base_url}/special-systems/{special_system.slug}"
+
+
+def _system_image_url(system: SystemRecord) -> str | None:
+    if not system.image_path:
+        return None
+    return f"/system-images/{system.id}"
+
+
+def _catalog_badges_for_system(system: SystemRecord) -> str:
+    badges: list[str] = []
+    if system.website_price:
+        badges.append(f'<span class="catalog-badge">{_escape(_money_label(system.website_price, system.website_currency))}</span>')
+    if system.paypal_link:
+        badges.append('<span class="catalog-badge">פייפאל</span>')
+    if system.roblox_gamepass_id:
+        badges.append('<span class="catalog-badge">רובקס</span>')
+    if not badges:
+        badges.append('<span class="catalog-badge warn">אין שיטת רכישה זמינה כרגע</span>')
+    return ''.join(badges)
+
+
+def _render_system_card(system: SystemRecord, *, owned: bool = False, discount_percent: int | None = None) -> str:
+    image_url = _system_image_url(system)
+    image_html = (
+        f'<img class="catalog-media" src="{_escape(image_url)}" alt="{_escape(system.name)}">'
+        if image_url
+        else '<div class="catalog-media catalog-placeholder">אין תמונת תצוגה</div>'
+    )
+    extra_badges: list[str] = []
+    if owned:
+        extra_badges.append('<span class="catalog-badge">כבר בבעלותך</span>')
+    if discount_percent is not None:
+        extra_badges.append(f'<span class="catalog-badge">הנחה אישית {discount_percent}%</span>')
+    add_to_cart_html = ""
+    if not owned and system.website_price:
+        add_to_cart_html = f'''<form method="post" action="/cart" class="inline-form"><input type="hidden" name="action" value="add"><input type="hidden" name="system_id" value="{system.id}"><button type="submit" class="ghost-button">הוסף לעגלה</button></form>'''
+    return f"""
+    <article class="catalog-card">
+        {image_html}
+        <div class="catalog-meta">
+            <div>
+                <h2>{_escape(system.name)}</h2>
+                <p>{_escape(system.description)}</p>
+            </div>
+            <div class="catalog-badges">{_catalog_badges_for_system(system)}{''.join(extra_badges)}</div>
+            <div class="actions"><a class="link-button" href="/systems/{system.id}">פתח עמוד מערכת</a>{add_to_cart_html}</div>
+        </div>
+    </article>
+    """
+
+
+def _render_special_system_card(special_system: SpecialSystemRecord) -> str:
+    payment_summary = ', '.join(method.label for method in special_system.payment_methods) or 'לפי תיאום'
+    return f"""
+    <article class="catalog-card">
+        <div class="catalog-media catalog-placeholder">מערכת מיוחדת</div>
+        <div class="catalog-meta">
+            <div>
+                <h2>{_escape(special_system.title)}</h2>
+                <p>{_escape(special_system.description)}</p>
+            </div>
+            <div class="catalog-badges"><span class="catalog-badge">{_escape(payment_summary)}</span></div>
+            <div class="actions"><a class="link-button" href="/special-systems/{_escape(special_system.slug)}">פתח עמוד הזמנה</a></div>
+        </div>
+    </article>
+    """
+
+
+async def website_home_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    systems = await bot.services.systems.list_public_systems()
+    special_systems = await bot.services.special_systems.list_special_systems(active_only=True)
+    content = f"""
+    <div class="hero-banner">
+        <div class="hero-banner-card">
+            <p class="eyebrow">Magic Studio's</p>
+            <h2>ברוכים הבאים לאתר המכירות</h2>
+            <p>כאן אפשר לראות את המערכות, לעבור למסלולי רכישה, לעיין בדירוגים ולהיכנס לעמוד הפרופיל האישי שלך.</p>
+            <div class="actions">
+                <a class="link-button" href="/systems">מעבר למערכות</a>
+                <a class="link-button ghost-button" href="/special-systems">מערכות מיוחדות</a>
+            </div>
+        </div>
+        <div class="hero-side-card">
+            <p class="eyebrow">גישה מהירה</p>
+            <p>כל רכישה באתר קשורה לחשבון דיסקורד המחובר, כדי שהמערכות, הדירוגים וההורדות יישמרו לך במקום אחד.</p>
+        </div>
+    </div>
+    <div class="profile-summary-grid">
+        <div class="summary-tile"><strong>{len(systems)}</strong><span>מערכות שמורות</span></div>
+        <div class="summary-tile"><strong>{len(special_systems)}</strong><span>מערכות מיוחדות פעילות</span></div>
+        <div class="summary-tile"><strong>{'מחובר' if session else 'לא מחובר'}</strong><span>מצב החשבון באתר</span></div>
+    </div>
+    <div class="catalog-grid">
+        <article class="catalog-card">
+            <div class="catalog-meta">
+                <div>
+                    <h2>מערכות</h2>
+                    <p>רשימת כל המערכות הרגילות, עם עמוד מפורט לכל מערכת ושיטות רכישה זמינות.</p>
+                </div>
+                <div class="actions"><a class="link-button" href="/systems">לכל המערכות</a></div>
+            </div>
+        </article>
+        <article class="catalog-card">
+            <div class="catalog-meta">
+                <div>
+                    <h2>מערכות מיוחדות</h2>
+                    <p>הצעות מיוחדות עם טופס הזמנה ישיר ופרטי תשלום מותאמים.</p>
+                </div>
+                <div class="actions"><a class="link-button" href="/special-systems">למערכות המיוחדות</a></div>
+            </div>
+        </article>
+        <article class="catalog-card">
+            <div class="catalog-meta">
+                <div>
+                    <h2>דירוגים</h2>
+                    <p>כל הדירוגים שכבר נשמרו במערכת מוצגים גם באתר בעמוד אחד.</p>
+                </div>
+                <div class="actions"><a class="link-button" href="/vouches">לכל הדירוגים</a></div>
+            </div>
+        </article>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="אתר המכירות של Magic Studio's",
+        intro="מרכז אחד למערכות, מערכות מיוחדות, דירוגים והעמוד האישי שלך.",
+        login_path=request.path,
+        section_label="דף הבית",
+        content=content,
+    )
+    return _page_response("דף הבית", body)
+
+
+async def website_info_page(request: web.Request) -> web.Response:
+    _, session = await _require_active_site_session(request)
+    invite_url = "https://discord.gg/xAf4YM9V3j"
+    content = f"""
+    <div class="hero-banner">
+        <div class="hero-banner-card">
+            <p class="eyebrow">מידע</p>
+            <h2>ברוכים הבאים לאתר שלנו</h2>
+            <p>באתר זה תוכלו לקנות את המערכות שמגיק מכין ומוכר בעזרת כסף אמיתי. לקניה ברובקס כנסו לשרת הדיסקורד וקנו מהמשחק מכירות.</p>
+            <p>לעזרה ותמיכה כנסו לשרת דיסקורד.</p>
+            <div class="actions"><a class="link-button" href="{invite_url}" target="_blank" rel="noreferrer">קישור לשרת הדיסקורד</a></div>
+        </div>
+        <div class="hero-side-card">
+            <p class="eyebrow">מסמכים</p>
+            <p>עמוד זה מרכז גם את מדיניות הפרטיות וגם את תנאי השימוש של האתר והשירות.</p>
+        </div>
+    </div>
+    <div class="doc-grid">
+        <article class="doc-card copy-stack">
+            <h2 id="privacy">מדיניות פרטיות</h2>
+            <ul class="doc-list">
+                <li>ייתכן שיישמרו מזהי משתמש של דיסקורד, רשומות בעלות, בלאקליסט ודירוגים לצורך תפעול השירות.</li>
+                <li>אם חשבון רובלוקס מחובר, ייתכן שיישמרו גם פרטי הזיהוי הציבוריים הדרושים לחיבור.</li>
+                <li>קבצי מערכות נשמרים לצורך מסירה מאובטחת לרוכשים מורשים בלבד.</li>
+            </ul>
+            <div class="actions"><a class="link-button ghost-button" href="/privacy">לעמוד המדיניות המלא</a></div>
+        </article>
+        <article class="doc-card copy-stack">
+            <h2 id="terms">תנאי שימוש</h2>
+            <ul class="doc-list">
+                <li>השימוש באתר ובבוט מיועד ללקוחות ולחברי השרת המורשים בלבד.</li>
+                <li>ניסיון לנצל לרעה רכישות, חשבונות או תהליכי גישה עלול לגרום להסרת גישה.</li>
+                <li>מסירת מערכות ורכישות כפופות לכללי השרת ולשיקול דעת הצוות.</li>
+            </ul>
+            <div class="actions"><a class="link-button ghost-button" href="/terms">לעמוד התנאים המלא</a></div>
+        </article>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="מידע על האתר",
+        intro="כאן נמצאים פרטי השירות, קישור התמיכה ומסמכי המדיניות של האתר.",
+        login_path=request.path,
+        section_label="מידע",
+        content=content,
+    )
+    return _page_response("מידע", body)
+
+
+async def public_systems_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    systems = await bot.services.systems.list_public_systems()
+    owned_ids = {system.id for system in await bot.services.ownership.list_user_systems(session.discord_user_id)}
+    discounts = {
+        discount.system.id: discount.discount_percent
+        for discount in await bot.services.discounts.list_user_discounts(session.discord_user_id)
+    }
+    content = (
+        '<div class="catalog-grid">' + ''.join(
+            _render_system_card(system, owned=system.id in owned_ids, discount_percent=discounts.get(system.id))
+            for system in systems
+        ) + '</div>'
+        if systems
+        else '<div class="empty-card"><h2>אין מערכות זמינות כרגע</h2><p>נסו שוב מאוחר יותר.</p></div>'
+    )
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="מערכות",
+        intro="כל המערכות שמחוברות לבוט, עם עמוד מפורט לכל מערכת ואפשרות רכישה או הורדה לבעלים קיימים.",
+        login_path=request.path,
+        section_label="קטלוג מערכות",
+        content=content,
+    )
+    return _page_response("מערכות", body)
+
+
+async def public_system_detail_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
+    owned = await bot.services.ownership.user_owns_system(session.discord_user_id, system.id)
+    if (not system.is_visible_on_website or not system.is_for_sale or not system.is_in_stock) and not owned:
+        raise NotFoundError("המערכת שביקשת לא זמינה כרגע לרכישה באתר.")
+    discount = await bot.services.discounts.get_discount_optional(session.discord_user_id, system.id)
+    image_url = _system_image_url(system)
+    image_html = (
+        f'<img src="{_escape(image_url)}" alt="{_escape(system.name)}">'
+        if image_url
+        else '<div class="catalog-media catalog-placeholder">אין תמונת תצוגה</div>'
+    )
+    robux_url = bot.services.systems.gamepass_url_for_id(system.roblox_gamepass_id)
+    actions: list[str] = []
+    if owned:
+        actions.append(f'<a class="link-button" href="/downloads/{system.id}">הורדה מהירה</a>')
+    if not owned and system.website_price:
+        actions.append(
+            f'<form method="post" action="/cart" class="inline-form"><input type="hidden" name="action" value="add"><input type="hidden" name="system_id" value="{system.id}"><button type="submit" class="link-button">הוסף לעגלה</button></form>'
+        )
+    if system.paypal_link:
+        actions.append(f'<a class="link-button ghost-button" href="/systems/{system.id}/buy/paypal">רכישה דרך פייפאל</a>')
+    if robux_url:
+        actions.append(f'<a class="link-button ghost-button" href="{_escape(robux_url)}" target="_blank" rel="noreferrer">רכישה ברובקס</a>')
+    actions_html = ''.join(actions) if actions else '<span class="catalog-badge warn">אין שיטת רכישה זמינה כרגע</span>'
+    discount_html = f'<div class="meta-card"><strong>הנחה אישית:</strong> {discount.discount_percent}% על המערכת הזאת.</div>' if discount is not None else ''
+    ownership_html = '<div class="meta-card"><strong>מצב בעלות:</strong> המערכת כבר בבעלותך וניתנת להורדה ישירה.</div>' if owned else '<div class="meta-card"><strong>מצב בעלות:</strong> המערכת עדיין לא רשומה בבעלותך.</div>'
+    price_html = (
+        f'<div class="meta-card"><strong>מחיר באתר:</strong> {_escape(_money_label(system.website_price, system.website_currency))}</div>'
+        if system.website_price
+        else '<div class="meta-card"><strong>מחיר באתר:</strong> עדיין לא הוגדר מחיר עגלה למערכת הזאת.</div>'
+    )
+    content = f"""
+    <div class="system-detail-grid">
+        <div class="system-preview">{image_html}</div>
+        <div class="card stack">
+            <div>
+                <h2>{_escape(system.name)}</h2>
+                <p>{_escape(system.description)}</p>
+            </div>
+            <div class="catalog-badges">{_catalog_badges_for_system(system)}</div>
+            {price_html}
+            {discount_html}
+            {ownership_html}
+            <div class="actions">{actions_html}</div>
+        </div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path="/systems",
+        title=system.name,
+        intro="עמוד המערכת כולל שיטות רכישה, סטטוס בעלות והורדה ישירה לחשבון המחובר.",
+        login_path=request.path,
+        section_label="מערכת",
+        content=content,
+    )
+    return _page_response(system.name, body)
+
+
+async def special_systems_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    systems = await bot.services.special_systems.list_special_systems(active_only=True)
+    content = (
+        '<div class="catalog-grid">' + ''.join(_render_special_system_card(system) for system in systems) + '</div>'
+        if systems
+        else '<div class="empty-card"><h2>אין מערכות מיוחדות פעילות כרגע</h2><p>נסו שוב מאוחר יותר.</p></div>'
+    )
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="מערכות מיוחדות",
+        intro="כאן תמצאו הצעות מיוחדות עם טופס הזמנה ישיר מתוך האתר.",
+        login_path=request.path,
+        section_label="קטלוג מערכות מיוחדות",
+        content=content,
+    )
+    return _page_response("מערכות מיוחדות", body)
+
+
+async def website_paypal_purchase_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
+    if not system.paypal_link:
+        raise PermissionDeniedError("למערכת הזאת אין כרגע קישור פייפאל פעיל.")
+    purchase = await bot.services.payments.create_purchase(session.discord_user_id, system.id, system.paypal_link)
+    content = f"""
+    <div class="card stack">
+        <h2>רכישה דרך פייפאל</h2>
+        <p>נוצרה עבורך רשומת רכישה מספר <strong>#{purchase.id}</strong>. לחץ על הכפתור למטה כדי לעבור לקישור הפייפאל המחובר למערכת.</p>
+        <div class="meta-card"><strong>מערכת:</strong> {_escape(system.name)}</div>
+        <div class="actions">
+            <a class="link-button" href="{_escape(system.paypal_link)}" target="_blank" rel="noreferrer">פתח את פייפאל</a>
+            <a class="link-button ghost-button" href="/systems/{system.id}">חזרה לעמוד המערכת</a>
+        </div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path="/systems",
+        title="מעבר לתשלום",
+        intro="האתר שמר עבורך רשומת רכישה לפני המעבר לקישור התשלום.",
+        login_path=request.path,
+        section_label="פייפאל",
+        content=content,
+    )
+    return _page_response("פייפאל", body)
+
+
+async def website_cart_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    if request.method == "POST":
+        form = await request.post()
+        action = str(form.get("action", "")).strip()
+        if action == "add":
+            system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת")
+            assert system_id is not None
+            system = await bot.services.systems.get_system(system_id)
+            await bot.services.cart.add_system(session.discord_user_id, system)
+            raise web.HTTPFound("/cart?saved=added")
+        if action == "remove":
+            system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת")
+            assert system_id is not None
+            await bot.services.cart.remove_system(session.discord_user_id, system_id)
+            raise web.HTTPFound("/cart?saved=removed")
+        if action == "clear":
+            await bot.services.cart.clear_cart(session.discord_user_id)
+            raise web.HTTPFound("/cart?saved=cleared")
+
+    notice_map = {
+        "added": "המערכת נוספה לעגלה.",
+        "removed": "המערכת הוסרה מהעגלה.",
+        "cleared": "העגלה נוקתה בהצלחה.",
+    }
+    saved_key = str(request.query.get("saved", "")).strip().lower()
+    notice = notice_map.get(saved_key)
+    items = await bot.services.cart.list_items(session.discord_user_id)
+    personal_discounts = {
+        record.system.id: record.discount_percent
+        for record in await bot.services.discounts.list_user_discounts(session.discord_user_id)
+    }
+    pricing_rows, subtotal, currency = _build_cart_pricing(items, personal_discounts=personal_discounts)
+
+    if pricing_rows:
+        cart_rows = "".join(
+            f'''
+            <div class="price-item">
+                <div>
+                    <strong>{_escape(row["item"].system.name)}</strong><br>
+                    <span class="muted">{_escape(row["item"].system.description[:120])}</span>
+                    {f'<br><span class="muted">הנחה אישית {row["personal_discount_percent"]}%</span>' if row["personal_discount_percent"] else ''}
+                </div>
+                <div>
+                    <strong>{_escape(_money_label(row["effective_price"], currency))}</strong>
+                    {f'<br><span class="muted">מחיר רגיל {_escape(_money_label(row["base_price"], currency))}</span>' if row["personal_discount_percent"] else ''}
+                </div>
+                <form method="post" class="inline-form">
+                    <input type="hidden" name="action" value="remove">
+                    <input type="hidden" name="system_id" value="{row["item"].system.id}">
+                    <button type="submit" class="ghost-button danger">הסר</button>
+                </form>
+            </div>
+            '''
+            for row in pricing_rows
+        )
+        summary_html = f'''
+        <div class="card stack">
+            <h2>סיכום העגלה</h2>
+            <div class="price-list">
+                <div class="price-item"><strong>כמות מערכות</strong><span>{len(pricing_rows)}</span></div>
+                <div class="price-item"><strong>סכום ביניים</strong><span>{_escape(_money_label(subtotal, currency))}</span></div>
+            </div>
+            <div class="actions">
+                <a class="link-button" href="/checkout">מעבר לקופה</a>
+                <a class="link-button ghost-button" href="/systems">המשך קניה</a>
+                <form method="post" class="inline-form"><input type="hidden" name="action" value="clear"><button type="submit" class="ghost-button danger">נקה עגלה</button></form>
+            </div>
+        </div>
+        '''
+        content = f'''
+        {_notice_html(notice, success=True)}
+        <div class="split-grid">
+            <div class="card stack"><h2>הפריטים שלך</h2><div class="price-list">{cart_rows}</div></div>
+            {summary_html}
+        </div>
+        '''
+    else:
+        content = _notice_html(notice, success=True) + '''
+        <div class="empty-card">
+            <h2>העגלה ריקה כרגע</h2>
+            <p>אפשר לחזור לקטלוג, להוסיף כמה מערכות שתרצה, ואז להמשיך לקופה אחת משותפת.</p>
+            <div class="actions"><a class="link-button" href="/systems">למעבר למערכות</a></div>
+        </div>
+        '''
+
+    body = _public_shell(
+        session,
+        current_path="/cart",
+        title="העגלה שלך",
+        intro="כאן אפשר לרכז כמה מערכות להזמנה אחת, לראות הנחות אישיות לפני הקופה ולעבור להזמנת תשלום מרוכזת.",
+        login_path=request.path,
+        section_label="עגלה",
+        content=content,
+    )
+    return _page_response("העגלה שלך", body)
+
+
+async def website_checkout_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    code_text = ""
+    note = ""
+    payment_method = "card"
+
+    try:
+        bot, session = await _require_active_site_session(request)
+        items = await bot.services.cart.list_items(session.discord_user_id)
+        personal_discounts = {
+            record.system.id: record.discount_percent
+            for record in await bot.services.discounts.list_user_discounts(session.discord_user_id)
+        }
+        pricing_rows, subtotal, currency = _build_cart_pricing(items, personal_discounts=personal_discounts)
+        if not pricing_rows:
+            content = '''
+            <div class="empty-card">
+                <h2>אין מה לשלוח לקופה</h2>
+                <p>צריך להוסיף לפחות מערכת אחת לעגלה לפני יצירת הזמנה.</p>
+                <div class="actions"><a class="link-button" href="/systems">למעבר למערכות</a></div>
+            </div>
+            '''
+            body = _public_shell(
+                session,
+                current_path="/cart",
+                title="קופה",
+                intro="הקופה מחכה לפריטים מהעגלה שלך.",
+                login_path=request.path,
+                section_label="קופה",
+                content=content,
+            )
+            return _page_response("קופה", body)
+
+        code_record: DiscountCodeRecord | None = None
+        code_discount_amount = Decimal("0.00")
+
+        if request.method == "POST":
+            form = await request.post()
+            payment_method = str(form.get("payment_method", "card")).strip().lower() or "card"
+            code_text = str(form.get("discount_code", "")).strip().upper()
+            note = str(form.get("note", "")).strip()
+            action = str(form.get("action", "preview")).strip().lower()
+
+            if code_text:
+                try:
+                    code_record, discount_amount_text = await bot.services.discount_codes.preview_discount(
+                        session.discord_user_id,
+                        code_text,
+                        items,
+                    )
+                    code_discount_amount = _money_decimal(discount_amount_text)
+                except SalesBotError as exc:
+                    notice = str(exc)
+                    success = False
+                    code_record = None
+                    code_discount_amount = Decimal("0.00")
+
+            total_amount = max(Decimal("0.00"), subtotal - code_discount_amount)
+            if action == "submit" and success:
+                effective_items = [
+                    (row["item"].system, format(row["effective_price"], "f"))
+                    for row in pricing_rows
+                ]
+                order = await bot.services.payments.create_checkout_order(
+                    user_id=session.discord_user_id,
+                    payment_method=payment_method,
+                    items=effective_items,
+                    subtotal_amount=format(subtotal, "f"),
+                    discount_amount=format(code_discount_amount, "f"),
+                    total_amount=format(total_amount, "f"),
+                    currency=currency,
+                    note=note or None,
+                    discount_code_id=code_record.id if code_record is not None else None,
+                    discount_code_text=code_record.code if code_record is not None else None,
+                )
+                if code_record is not None:
+                    await bot.services.discount_codes.record_redemption(
+                        code_record.id,
+                        session.discord_user_id,
+                        order.id,
+                        format(code_discount_amount, "f"),
+                    )
+                await bot.services.cart.clear_cart(session.discord_user_id)
+
+                summary_message = (
+                    f"הזמנה #{order.id} נפתחה ונשמרה במערכת. הסכום הכולל הוא {_money_label(order.total_amount, order.currency)} "
+                    f"בשיטת {_checkout_method_label(order.payment_method)}."
+                )
+                await bot.services.notifications.create_notification(
+                    user_id=session.discord_user_id,
+                    title=f"הזמנה חדשה #{order.id}",
+                    body=summary_message + " צוות האתר יעבור עליה ידנית ויעדכן אותך ברגע שיהיה שינוי.",
+                    link_path="/inbox",
+                    kind="checkout",
+                )
+                await _send_optional_user_dm(
+                    bot,
+                    user_id=session.discord_user_id,
+                    title=f"הזמנה חדשה #{order.id}",
+                    body=summary_message,
+                    link_path="/inbox",
+                )
+
+                owner = bot.get_user(bot.settings.owner_user_id) or await bot.fetch_user(bot.settings.owner_user_id)
+                owner_dm = owner.dm_channel or await owner.create_dm()
+                owner_lines = "\n".join(
+                    f"- {row['item'].system.name}: {_money_label(row['effective_price'], currency)}"
+                    for row in pricing_rows
+                )
+                code_line = f"\nקוד הנחה: {code_record.code} (-{_money_label(code_discount_amount, currency)})" if code_record is not None else ""
+                try:
+                    await owner_dm.send(
+                        "הגיעה הזמנת קופה חדשה מהאתר\n"
+                        f"משתמש: {_session_label(session)} ({session.discord_user_id})\n"
+                        f"מזהה הזמנה: #{order.id}\n"
+                        f"שיטת תשלום: {_checkout_method_label(order.payment_method)}\n"
+                        f"סכום ביניים: {_money_label(subtotal, currency)}{code_line}\n"
+                        f"סה\"כ: {_money_label(total_amount, currency)}\n"
+                        f"מערכות:\n{owner_lines}\n"
+                        f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts"
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning("Failed to DM owner about checkout order %s", order.id, exc_info=True)
+
+                success_content = f'''
+                <div class="card stack">
+                    <h2>ההזמנה נפתחה</h2>
+                    <p>הקופה נשמרה בהצלחה כמספר <strong>#{order.id}</strong>. כרגע האתר עובד עם אישור ידני לקופות מרובות פריטים, לכן הצוות יעבור על ההזמנה ויעדכן אותך דרך מרכז ההתראות.</p>
+                    <div class="price-list">
+                        <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                        <div class="price-item"><strong>סכום לתשלום</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
+                        <div class="price-item"><strong>סטטוס</strong><span>{_status_badge(order.status)}</span></div>
+                    </div>
+                    <div class="actions"><a class="link-button" href="/inbox">למרכז ההתראות</a><a class="link-button ghost-button" href="/systems">חזור לחנות</a></div>
+                </div>
+                '''
+                body = _public_shell(
+                    session,
+                    current_path="/cart",
+                    title="הזמנה נוצרה",
+                    intro="הקופה נשמרה ונשלחה לטיפול מנהל.",
+                    login_path=request.path,
+                    section_label="קופה",
+                    content=success_content,
+                )
+                return _page_response("הזמנה נוצרה", body)
+
+        else:
+            total_amount = subtotal
+
+        if request.method != "POST":
+            total_amount = subtotal
+
+        checkout_rows = "".join(
+            f'''
+            <div class="price-item">
+                <div>
+                    <strong>{_escape(row["item"].system.name)}</strong>
+                    {f'<br><span class="muted">הנחה אישית {row["personal_discount_percent"]}%</span>' if row["personal_discount_percent"] else ''}
+                </div>
+                <span>{_escape(_money_label(row["effective_price"], currency))}</span>
+            </div>
+            '''
+            for row in pricing_rows
+        )
+        if code_record is not None:
+            total_amount = max(Decimal("0.00"), subtotal - code_discount_amount)
+            code_notice = f'<div class="meta-card"><strong>קוד פעיל:</strong> {_escape(code_record.code)} | חיסכון {_escape(_money_label(code_discount_amount, currency))}</div>'
+        else:
+            code_notice = '<div class="meta-card"><strong>קוד הנחה:</strong> אפשר להזין קוד וללחוץ על בדיקה לפני שליחת הקופה.</div>'
+
+        content = f'''
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <h2>פרטי הקופה</h2>
+                <form method="post" class="stack">
+                    <label class="field"><span>שיטת תשלום</span><select name="payment_method"><option value="card"{' selected' if payment_method == 'card' else ''}>כרטיס אשראי</option><option value="paypal"{' selected' if payment_method == 'paypal' else ''}>PayPal</option></select></label>
+                    <label class="field"><span>קוד הנחה</span><input type="text" name="discount_code" maxlength="32" value="{_escape(code_text)}" placeholder="SUMMER10"></label>
+                    <label class="field field-wide"><span>הערה לצוות</span><textarea name="note" placeholder="למשל: עדיף לפנות אליי קודם בדיסקורד">{_escape(note)}</textarea></label>
+                    <div class="actions"><button type="submit" name="action" value="preview" class="ghost-button">בדוק קוד וחשב מחדש</button><button type="submit" name="action" value="submit">שלח קופה</button></div>
+                </form>
+                {code_notice}
+                <p class="muted">הקופה שומרת הזמנה מרוכזת בכרטיס או PayPal. אישור התשלום עצמו מטופל כרגע ידנית על ידי צוות האתר.</p>
+            </div>
+            <div class="card stack">
+                <h2>סיכום חיוב</h2>
+                <div class="price-list">{checkout_rows}</div>
+                <div class="price-list">
+                    <div class="price-item"><strong>סכום ביניים</strong><span>{_escape(_money_label(subtotal, currency))}</span></div>
+                    <div class="price-item"><strong>הנחת קוד</strong><span>{_escape(_money_label(code_discount_amount, currency))}</span></div>
+                    <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(total_amount, currency))}</span></div>
+                </div>
+            </div>
+        </div>
+        '''
+        body = _public_shell(
+            session,
+            current_path="/cart",
+            title="קופה",
+            intro="בדוק את כל הפריטים, החל קוד הנחה אם יש, ואז פתח הזמנת תשלום אחת לכל המערכות יחד.",
+            login_path=request.path,
+            section_label="קופה",
+            content=content,
+        )
+        return _page_response("קופה", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        notice = str(exc)
+        success = False
+        bot, session = await _require_active_site_session(request)
+        content = _notice_html(notice, success=success) + '<div class="actions"><a class="link-button" href="/cart">חזרה לעגלה</a></div>'
+        body = _public_shell(
+            session,
+            current_path="/cart",
+            title="קופה",
+            intro="אירעה שגיאה במהלך בדיקת הקופה.",
+            login_path=request.path,
+            section_label="קופה",
+            content=content,
+        )
+        return _page_response("קופה", body)
+
+
+async def website_inbox_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    if request.method == "POST":
+        form = await request.post()
+        action = str(form.get("action", "")).strip()
+        if action == "mark-read":
+            notification_id = _parse_positive_int(form.get("notification_id"), "מזהה התראה")
+            assert notification_id is not None
+            await bot.services.notifications.mark_read(session.discord_user_id, notification_id)
+            raise web.HTTPFound("/inbox?saved=read")
+        if action == "mark-all-read":
+            await bot.services.notifications.mark_all_read(session.discord_user_id)
+            raise web.HTTPFound("/inbox?saved=all-read")
+
+    notifications = await bot.services.notifications.list_notifications(session.discord_user_id)
+    unread_count = await bot.services.notifications.unread_count(session.discord_user_id)
+    orders = await bot.services.payments.list_user_checkout_orders(session.discord_user_id)
+    notice_map = {
+        "read": "ההתראה סומנה כנקראה.",
+        "all-read": "כל ההתראות סומנו כנקראו.",
+    }
+    notice = notice_map.get(str(request.query.get("saved", "")).strip().lower())
+
+    notifications_html = ''.join(
+        f'''
+        <div class="card stack">
+            <div class="actions"><div>{'<span class="catalog-badge warn">לא נקראה</span>' if not record.is_read else '<span class="catalog-badge">נקראה</span>'}</div></div>
+            <div>
+                <h3>{_escape(record.title)}</h3>
+                <p>{_escape(record.body)}</p>
+                <p class="muted">נשלח ב-{_escape(record.created_at)}</p>
+                {f'<p><a href="{_escape(record.link_path)}">פתח קישור קשור</a></p>' if record.link_path else ''}
+            </div>
+            <div class="actions">{'' if record.is_read else f'<form method="post" class="inline-form"><input type="hidden" name="action" value="mark-read"><input type="hidden" name="notification_id" value="{record.id}"><button type="submit" class="ghost-button">סמן כנקראה</button></form>'}</div>
+        </div>
+        '''
+        for record in notifications
+    ) or '<div class="empty-card"><p>עדיין אין התראות בחשבון שלך.</p></div>'
+
+    orders_html = ''.join(
+        f'''
+        <div class="card stack">
+            <div class="price-list">
+                <div class="price-item"><strong>הזמנה #{order.id}</strong><span>{_status_badge(order.status)}</span></div>
+                <div class="price-item"><strong>אמצעי תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
+                <div class="price-item"><strong>נפתחה ב</strong><span>{_escape(order.created_at)}</span></div>
+                {f'<div class="price-item"><strong>סיבת ביטול</strong><span>{_escape(order.cancel_reason or "-")}</span></div>' if order.status == 'cancelled' else ''}
+            </div>
+        </div>
+        '''
+        for order in orders
+    ) or '<div class="empty-card"><p>עדיין אין הזמנות קופה חדשות בחשבון שלך.</p></div>'
+
+    content = f'''
+    {_notice_html(notice, success=True)}
+    <div class="profile-summary-grid">
+        <div class="summary-tile"><strong>{unread_count}</strong><span>התראות שלא נקראו</span></div>
+        <div class="summary-tile"><strong>{len(notifications)}</strong><span>סה"כ התראות</span></div>
+        <div class="summary-tile"><strong>{len(orders)}</strong><span>הזמנות קופה</span></div>
+    </div>
+    <div class="split-grid">
+        <div class="card stack">
+            <div class="actions"><h2>התראות</h2><form method="post" class="inline-form"><input type="hidden" name="action" value="mark-all-read"><button type="submit" class="ghost-button">סמן הכל כנקרא</button></form></div>
+            {notifications_html}
+        </div>
+        <div class="card stack">
+            <h2>הזמנות קופה</h2>
+            {orders_html}
+        </div>
+    </div>
+    '''
+    body = _public_shell(
+        session,
+        current_path="/inbox",
+        title="מרכז ההתראות",
+        intro="כאן יופיעו עדכוני צוות, תשובות להזמנות, ואישור או ביטול של קופות שנפתחו דרך האתר.",
+        login_path=request.path,
+        section_label="התראות",
+        content=content,
+    )
+    return _page_response("מרכז ההתראות", body)
+
+
+async def website_profile_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    if request.method == "POST":
+        form = await request.post()
+        action = str(form.get("action", "")).strip()
+        if action == "save-theme":
+            theme_mode = str(form.get("theme_mode", "default")).strip().lower()
+            if theme_mode not in THEME_LABELS:
+                raise PermissionDeniedError("מצב התצוגה שנבחר לא תקין.")
+            response = web.HTTPFound("/profile?saved=theme")
+            _set_theme_cookie(response, theme_mode, secure=bot.settings.public_base_url.startswith("https://"))
+            raise response
+
+    notice = "ערכת הנושא עודכנה בהצלחה." if request.query.get("saved") == "theme" else None
+    theme_mode = _theme_mode_from_request(request)
+    is_admin = await bot.services.admins.is_admin(session.discord_user_id)
+    avatar_url = _session_avatar(session)
+    avatar_html = f'<img class="profile-avatar" src="{_escape(avatar_url)}" alt="avatar">' if avatar_url else '<div class="profile-avatar"></div>'
+    try:
+        roblox_link = await bot.services.oauth.get_link(session.discord_user_id)
+    except SalesBotError:
+        roblox_link = None
+    ownerships = await bot.services.ownership.list_user_ownerships(session.discord_user_id)
+    discounts = await bot.services.discounts.list_user_discounts(session.discord_user_id)
+    owned_list = ''.join(
+        f'<div class="price-item"><strong>{_escape(ownership.system.name)}</strong><span>{_escape(ownership.granted_at)}</span><a class="link-button ghost-button" href="/downloads/{ownership.system.id}">הורדה</a></div>'
+        for ownership in ownerships
+    ) or '<div class="empty-card"><p>עדיין אין מערכות בבעלותך.</p></div>'
+    discount_list = ''.join(
+        f'<div class="price-item"><strong>{_escape(record.system.name)}</strong><span>{record.discount_percent}% הנחה</span></div>'
+        for record in discounts
+    ) or '<div class="empty-card"><p>אין כרגע הנחות שמחוברות לחשבון שלך.</p></div>'
+    roblox_block = '<div class="price-item"><strong>רובלוקס</strong><span>לא מחובר כרגע</span></div>'
+    if roblox_link is not None:
+        summary = ' | '.join(part for part in (roblox_link.roblox_display_name, roblox_link.roblox_username, roblox_link.roblox_sub) if part)
+        profile_link_html = f'<a href="{_escape(roblox_link.profile_url or "")}" target="_blank" rel="noreferrer">פתח פרופיל</a>' if roblox_link.profile_url else 'אין קישור פרופיל'
+        roblox_block = f'<div class="price-item"><strong>רובלוקס</strong><span>{_escape(summary)}</span></div><div class="price-item"><strong>פרופיל</strong><span>{profile_link_html}</span></div>'
+    content = f"""
+    {_notice_html(notice, success=True)}
+    <div class="profile-grid">
+        <div class="card stack">
+            <div class="profile-hero">
+                {avatar_html}
+                <div>
+                    <p class="eyebrow">החשבון שלך</p>
+                    <h2>{_escape(_session_label(session))}</h2>
+                    <p>כאן מרוכזים פרטי דיסקורד, החיבור לרובלוקס, המערכות שבבעלותך וההנחות שמחוברות לחשבון.</p>
+                </div>
+            </div>
+            <div class="profile-summary-grid">
+                <div class="summary-tile"><strong>{len(ownerships)}</strong><span>מערכות בבעלותך</span></div>
+                <div class="summary-tile"><strong>{len(discounts)}</strong><span>הנחות פעילות</span></div>
+                <div class="summary-tile"><strong>{_escape(_admin_rank_label(bot, session.discord_user_id) if is_admin else 'לקוח')}</strong><span>סוג חשבון</span></div>
+            </div>
+            <div class="price-list">
+                <div class="price-item"><strong>דיסקורד</strong><span>{_escape(_session_label(session))}</span></div>
+                <div class="price-item"><strong>מזהה משתמש</strong><span class="mono">{_escape(session.discord_user_id)}</span></div>
+                {roblox_block}
+            </div>
+        </div>
+        <div class="card stack">
+            <div>
+                <p class="eyebrow">מראה האתר</p>
+                <h2>ערכת נושא</h2>
+                <p class="setting-hint">ההעדפה נשמרת בדפדפן המחובר שלך ומשפיעה על כל האתר.</p>
+            </div>
+            <form method="post" class="settings-list">
+                <input type="hidden" name="action" value="save-theme">
+                <label class="field"><span>מצב תצוגה</span><select name="theme_mode">{_theme_options(theme_mode)}</select></label>
+                <div class="actions"><button type="submit">שמור העדפה</button></div>
+            </form>
+        </div>
+    </div>
+    <div class="split-grid">
+        <div class="card stack">
+            <h2>המערכות שלך</h2>
+            <div class="system-download-list">{owned_list}</div>
+        </div>
+        <div class="card stack">
+            <h2>הנחות על מערכות</h2>
+            <div class="price-list">{discount_list}</div>
+        </div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="הפרופיל שלך",
+        intro="כל המידע האישי, ההורדות וההעדפות שלך באתר מרוכזים כאן.",
+        login_path=request.path,
+        section_label="פרופיל",
+        content=content,
+    )
+    return _page_response("הפרופיל שלך", body)
+
+
+async def owned_system_download_page(request: web.Request) -> web.StreamResponse:
+    bot, session = await _require_active_site_session(request)
+    system_id = int(request.match_info["system_id"])
+    if not await bot.services.ownership.user_owns_system(session.discord_user_id, system_id):
+        raise PermissionDeniedError("המערכת שביקשת לא שייכת לחשבון המחובר.")
+
+    system = await bot.services.systems.get_system(system_id)
+    asset = await bot.services.systems.get_system_asset(system.id, asset_type=bot.services.systems.FILE_ASSET_TYPE)
+    stored_path = bot.services.systems.resolve_storage_path(system.file_path)
+    if stored_path is not None and stored_path.is_file():
+        response = web.FileResponse(stored_path)
+        response.headers["Content-Disposition"] = f'attachment; filename="{stored_path.name}"'
+        return response
+    if asset is not None:
+        content_type = mimetypes.guess_type(asset.asset_name)[0] or "application/octet-stream"
+        response = web.Response(body=asset.asset_bytes, content_type=content_type)
+        response.headers["Content-Disposition"] = f'attachment; filename="{asset.asset_name}"'
+        return response
+    raise NotFoundError("קובץ המערכת לא נמצא כרגע להורדה.")
+
+
+async def system_image_page(request: web.Request) -> web.StreamResponse:
+    bot: SalesBot = request.app["bot"]
+    system = await bot.services.systems.get_system(int(request.match_info["system_id"]))
+    if not system.image_path:
+        raise NotFoundError("לא נמצאה תמונת מערכת.")
+    asset = await bot.services.systems.get_system_asset(system.id, asset_type=bot.services.systems.IMAGE_ASSET_TYPE)
+    stored_path = bot.services.systems.resolve_storage_path(system.image_path)
+    if stored_path is not None and stored_path.is_file():
+        return web.FileResponse(stored_path)
+    if asset is not None:
+        content_type = mimetypes.guess_type(asset.asset_name)[0] or "application/octet-stream"
+        return web.Response(body=asset.asset_bytes, content_type=content_type)
+    raise NotFoundError("לא נמצאה תמונת מערכת.")
+
+
+async def website_vouches_page(request: web.Request) -> web.Response:
+    bot, session = await _require_active_site_session(request)
+    is_admin = await bot.services.admins.is_admin(session.discord_user_id)
+    notice: str | None = None
+    if request.method == "POST":
+        form = await request.post()
+        action = str(form.get("action", "")).strip()
+        if action == "delete":
+            if not is_admin:
+                raise PermissionDeniedError("רק אדמינים יכולים למחוק דירוגים מהאתר.")
+            vouch_id = _parse_positive_int(form.get("vouch_id"), "מזהה דירוג")
+            assert vouch_id is not None
+            deleted_vouch = await bot.services.vouches.delete_vouch(vouch_id)
+            channel = bot.get_channel(bot.settings.vouch_channel_id)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(bot.settings.vouch_channel_id)
+                except discord.HTTPException:
+                    channel = None
+            if deleted_vouch.posted_message_id is not None and channel is not None and hasattr(channel, "fetch_message"):
+                try:
+                    posted_message = await channel.fetch_message(deleted_vouch.posted_message_id)
+                    await posted_message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            notice = "הדירוג נמחק בהצלחה."
+    vouches = await bot.services.vouches.list_all_vouches()
+    cards: list[str] = []
+    for vouch in vouches:
+        admin_label, author_label = await asyncio.gather(
+            _discord_user_label(bot, vouch.admin_user_id),
+            _discord_user_label(bot, vouch.author_user_id),
+        )
+        delete_form = ""
+        if is_admin:
+            delete_form = f'<form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="vouch_id" value="{vouch.id}"><button type="submit" class="ghost-button danger">מחיקה</button></form>'
+        cards.append(
+            f"""
+            <article class="vouch-card">
+                <div class="stack">
+                    <div><strong>{_escape(admin_label)}</strong><p class="muted">דירוג מאת {_escape(author_label)}</p></div>
+                    <div class="stars">{'★' * vouch.rating}</div>
+                    <p>{_escape(vouch.reason)}</p>
+                    <div class="actions">{delete_form}</div>
+                </div>
+            </article>
+            """
+        )
+    content = _notice_html(notice, success=True) + (
+        '<div class="vouch-list">' + ''.join(cards) + '</div>'
+        if cards
+        else '<div class="empty-card"><h2>עדיין אין דירוגים</h2><p>כשהלקוחות יתחילו להשאיר דירוגים, הם יופיעו כאן.</p></div>'
+    )
+    body = _public_shell(
+        session,
+        current_path=request.path,
+        title="דירוגים",
+        intro="כל הדירוגים שנשמרו בדיסקורד מוצגים כאן גם באתר.",
+        login_path=request.path,
+        section_label="דירוגים",
+        content=content,
+    )
+    return _page_response("דירוגים", body)
+
+
+async def blacklist_appeal_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    bot, session = await _require_site_session(request)
+    entry = await _ensure_site_session_allowed(bot, session, allow_blacklisted=True)
+    if entry is None:
+        raise PermissionDeniedError("עמוד הערעור זמין רק למשתמשים שנמצאים כרגע בבלאקליסט.")
+
+    discord_name = _session_label(session)
+    roblox_name = ""
+    try:
+        linked_account = await bot.services.oauth.get_link(session.discord_user_id)
+    except SalesBotError:
+        linked_account = None
+    if linked_account is not None:
+        roblox_name = linked_account.roblox_display_name or linked_account.roblox_username or linked_account.roblox_sub or ""
+
+    appeal_reason = ""
+    if request.method == "POST":
+        try:
+            form = await request.post()
+            roblox_name = str(form.get("roblox_name", "")).strip()
+            appeal_reason = str(form.get("appeal_reason", "")).strip()
+            if not roblox_name or not appeal_reason:
+                raise PermissionDeniedError("חובה למלא את כל שדות הערעור.")
+
+            appeal = await bot.services.blacklist.create_appeal(
+                session.discord_user_id,
+                f"שם ברובלוקס: {roblox_name}\nשם בדיסקורד: {discord_name}",
+                appeal_reason,
+            )
+            owner = await bot.fetch_user(bot.settings.owner_user_id)
+            owner_dm = owner.dm_channel or await owner.create_dm()
+            embed = discord.Embed(title="בקשת הסרת בלאקליסט חדשה מהאתר", color=discord.Color.orange())
+            embed.add_field(name="משתמש בדיסקורד", value=f"{discord_name}\n{session.discord_user_id}", inline=False)
+            embed.add_field(name="שם ברובלוקס", value=roblox_name, inline=False)
+            embed.add_field(name="סיבה לבלאקליסט", value=entry.reason or "לא נמסרה", inline=False)
+            embed.add_field(name="למה להסיר את הבלאקליסט", value=appeal_reason, inline=False)
+            embed.set_footer(text=f"מספר בקשה: {appeal.id}")
+
+            view = AppealDecisionView(bot, appeal.id, session.discord_user_id)
+            owner_message = await owner_dm.send(embed=embed, view=view)
+            await bot.services.blacklist.set_owner_message(appeal.id, owner_message.id)
+            bot.add_view(view, message_id=owner_message.id)
+            notice = "הערעור נשלח בהצלחה לבעלים."
+        except SalesBotError as exc:
+            notice = str(exc)
+            success = False
+
+    content = f"""
+    {_notice_html(notice, success=success)}
+    <div class="split-grid">
+        <div class="card stack">
+            <div>
+                <h2>הגישה לאתר חסומה</h2>
+                <p>החשבון המחובר שלך נמצא כרגע בבלאקליסט ולכן אין גישה לשאר דפי האתר.</p>
+            </div>
+            <div class="meta-card"><strong>הסיבה:</strong> {_escape(entry.reason or 'לא נמסרה סיבה.')}</div>
+            <div class="meta-card"><strong>שם בדיסקורד:</strong> {_escape(discord_name)}</div>
+        </div>
+        <div class="card">
+            <h2>שליחת ערעור</h2>
+            <p class="muted">זהו הדף היחיד שזמין עבורך כרגע באתר. מלא את הפרטים כדי לשלוח ערעור לבעלים.</p>
+            <form method="post">
+                <div class="grid">
+                    <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_name" value="{_escape(roblox_name)}" required></label>
+                    <label class="field"><span>מה השם שלך בדיסקורד</span><input type="text" value="{_escape(discord_name)}" disabled></label>
+                    <label class="field field-wide"><span>למה אתה חושב שמגיע לך שנוריד לך בלאקליסט?</span><textarea name="appeal_reason" required>{_escape(appeal_reason)}</textarea></label>
+                </div>
+                <div class="actions"><button type="submit">שלח ערעור</button></div>
+            </form>
+        </div>
+    </div>
+    """
+    body = _public_shell(
+        session,
+        current_path="/blacklist-appeal",
+        title="ערעור על בלאקליסט",
+        intro="אם אתה חושב שהבלאקליסט צריך לרדת, שלח כאן ערעור מסודר לצוות.",
+        login_path=request.path,
+        section_label="בלאקליסט",
+        content=content,
+        show_nav=False,
+    )
+    return _page_response("ערעור על בלאקליסט", body)
 
 
 def _custom_order_admin_url(bot: "SalesBot", order_id: int) -> str:
@@ -968,11 +2175,14 @@ async def admin_dashboard_page(request: web.Request) -> web.Response:
         quick_links = """
         <div class="hero-grid">
             <div class="card"><h3>ניהול אדמינים</h3><p>הוספה והסרה של צוות הניהול מתוך האתר.</p><div class="actions"><a class="link-button" href="/admin/admins">פתח</a></div></div>
+            <div class="card"><h3>קופות אתר</h3><p>רשימת כל הזמנות הסל, אישור מסירה, או ביטול עם הודעה חזרה ללקוח.</p><div class="actions"><a class="link-button" href="/admin/checkouts">פתח</a></div></div>
             <div class="card"><h3>הזמנות אישיות</h3><p>רשימת כל ההזמנות האישיות, צפייה בפרטים, אישור, דחייה וסימון כהושלמה.</p><div class="actions"><a class="link-button" href="/admin/custom-orders">פתח</a></div></div>
             <div class="card"><h3>מערכות רגילות</h3><p>יצירת מערכות, עריכה, מחיקה ומתן או הסרה לפי User ID.</p><div class="actions"><a class="link-button" href="/admin/systems">פתח</a></div></div>
             <div class="card"><h3>גיימפאסים</h3><p>יצירה, עדכון, קישור ושליחה של גיימפאסים ישירות מתוך האתר.</p><div class="actions"><a class="link-button" href="/admin/gamepasses">פתח</a></div></div>
             <div class="card"><h3>מערכות מיוחדות</h3><p>פרסום מערכת מיוחדת עם כפתור קניה, תמונות, מחירים ושיטות תשלום.</p><div class="actions"><a class="link-button" href="/admin/special-systems">פתח</a></div></div>
             <div class="card"><h3>בקשות מיוחדות</h3><p>רשימת כל הבקשות, צפייה בפרטים, אישור או דחייה עם הודעה חזרה.</p><div class="actions"><a class="link-button" href="/admin/special-orders">פתח</a></div></div>
+            <div class="card"><h3>קודי הנחה</h3><p>יצירת קודים כלליים או קודים למערכת מסוימת, עם מגבלות שימוש ותוקף.</p><div class="actions"><a class="link-button" href="/admin/discount-codes">פתח</a></div></div>
+            <div class="card"><h3>התראות ללקוחות</h3><p>שליחת התראה ישירות לפי Discord User ID, כולל שמירה במרכז ההתראות באתר.</p><div class="actions"><a class="link-button" href="/admin/notifications">פתח</a></div></div>
             <div class="card"><h3>כלי תוכן קיימים</h3><p>הפאנלים הקיימים של סקרים, הגרלות ואירועים נשארו זמינים גם דרך האתר.</p><div class="actions"><a class="link-button" href="/admin/polls/new">סקרים</a><a class="link-button ghost-button" href="/admin/giveaways/new">הגרלות</a><a class="link-button ghost-button" href="/admin/events/new">אירועים</a></div></div>
             <div class="card"><h3>הגדרות אישיות</h3><p>פרטי החשבון המחובר, הדרגה שלך והעדפת ערכת הנושא של האתר.</p><div class="actions"><a class="link-button" href="/admin/settings">פתח</a></div></div>
         </div>
@@ -1050,6 +2260,279 @@ async def admin_admins_page(request: web.Request) -> web.Response:
         return _error_response("ניהול אדמינים", str(exc), status=400)
 
 
+async def admin_checkout_orders_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    try:
+        bot, session = await _require_admin_session(request)
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip()
+            order_id = _parse_positive_int(form.get("order_id"), "מזהה הזמנה")
+            assert order_id is not None
+            if action == "complete":
+                order = await bot.services.payments.complete_checkout_order(bot, order_id, session.discord_user_id)
+                message = f"הזמנה #{order.id} הושלמה והמערכות נשלחו ב-DM."
+                await bot.services.notifications.create_notification(
+                    user_id=order.user_id,
+                    title=f"הזמנה #{order.id} הושלמה",
+                    body=message,
+                    link_path="/inbox",
+                    kind="checkout",
+                    created_by=session.discord_user_id,
+                )
+                dm_sent = await _send_optional_user_dm(
+                    bot,
+                    user_id=order.user_id,
+                    title=f"הזמנה #{order.id} הושלמה",
+                    body=message,
+                    link_path="/inbox",
+                )
+                notice = message + (" נשלחה גם הודעת DM ללקוח." if dm_sent else " נשמרה התראה באתר, אבל DM לא נשלח.")
+            elif action == "cancel":
+                cancel_reason = str(form.get("cancel_reason", "")).strip() or "ההזמנה בוטלה על ידי צוות האתר."
+                order = await bot.services.payments.cancel_checkout_order(order_id, session.discord_user_id, cancel_reason)
+                await bot.services.notifications.create_notification(
+                    user_id=order.user_id,
+                    title=f"הזמנה #{order.id} בוטלה",
+                    body=cancel_reason,
+                    link_path="/inbox",
+                    kind="checkout",
+                    created_by=session.discord_user_id,
+                )
+                dm_sent = await _send_optional_user_dm(
+                    bot,
+                    user_id=order.user_id,
+                    title=f"הזמנה #{order.id} בוטלה",
+                    body=cancel_reason,
+                    link_path="/inbox",
+                )
+                notice = f"הזמנה #{order.id} בוטלה." + (" נשלחה גם הודעת DM ללקוח." if dm_sent else " ההתראה נשמרה באתר בלבד.")
+
+        orders = await bot.services.payments.list_checkout_orders(limit=120)
+        labels = await asyncio.gather(*(_discord_user_label(bot, order.user_id) for order in orders)) if orders else []
+        item_lists = await asyncio.gather(*(bot.services.payments.list_checkout_order_items(order.id) for order in orders)) if orders else []
+        cards = "".join(
+            f'''
+            <div class="card stack">
+                <div class="price-list">
+                    <div class="price-item"><strong>הזמנה #{order.id}</strong><span>{_status_badge(order.status)}</span></div>
+                    <div class="price-item"><strong>לקוח</strong><span>{_escape(label)}<br><span class="mono">{order.user_id}</span></span></div>
+                    <div class="price-item"><strong>שיטת תשלום</strong><span>{_escape(_checkout_method_label(order.payment_method))}</span></div>
+                    <div class="price-item"><strong>סכום ביניים</strong><span>{_escape(_money_label(order.subtotal_amount, order.currency))}</span></div>
+                    <div class="price-item"><strong>הנחה</strong><span>{_escape(_money_label(order.discount_amount, order.currency))}</span></div>
+                    <div class="price-item"><strong>סה"כ</strong><span>{_escape(_money_label(order.total_amount, order.currency))}</span></div>
+                    <div class="price-item"><strong>קוד הנחה</strong><span>{_escape(order.discount_code_text or 'ללא')}</span></div>
+                    <div class="price-item"><strong>נוצרה ב</strong><span>{_escape(order.created_at)}</span></div>
+                    {f'<div class="price-item"><strong>הערה</strong><span>{_escape(order.note)}</span></div>' if order.note else ''}
+                    {f'<div class="price-item"><strong>סיבת ביטול</strong><span>{_escape(order.cancel_reason or "-")}</span></div>' if order.status == 'cancelled' else ''}
+                </div>
+                <div>
+                    <h3>מערכות בהזמנה</h3>
+                    <div class="price-list">{_checkout_items_html(items, order.currency)}</div>
+                </div>
+                {'' if order.status != 'pending' else f'<div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="complete"><input type="hidden" name="order_id" value="{order.id}"><button type="submit">סמן כהושלמה ושלח</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="cancel"><input type="hidden" name="order_id" value="{order.id}"><input type="text" name="cancel_reason" placeholder="סיבת ביטול ללקוח"><button type="submit" class="ghost-button danger">בטל הזמנה</button></form></div>'}
+            </div>
+            '''
+            for order, label, items in zip(orders, labels, item_lists, strict=False)
+        ) or '<div class="empty-card"><p>עדיין אין הזמנות קופה שמורות במערכת.</p></div>'
+
+        content = f'''
+        {_notice_html(notice, success=success)}
+        <div class="card stack">
+            <h2>סקירת קופות אתר</h2>
+            <p>העמוד הזה מרכז את כל הזמנות הסל שנפתחו דרך האתר. אפשר לסמן הזמנה כהושלמה כדי לשלוח את כל המערכות, או לבטל עם סיבה שתישמר אצל הלקוח במרכז ההתראות.</p>
+        </div>
+        <div class="stack">{cards}</div>
+        '''
+        body = _admin_shell(session, current_path=request.path, title="קופות אתר", intro="כל הקופות המרוכזות שמגיעות מהאתר, עם אישור או ביטול ידני.", content=content)
+        return _page_response("קופות אתר", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("קופות אתר", str(exc), status=400)
+
+
+async def admin_discount_codes_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    try:
+        bot, session = await _require_admin_session(request)
+        systems = await bot.services.systems.list_systems()
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip()
+            if action == "create":
+                system_id = _parse_positive_int(form.get("system_id"), "מזהה מערכת", allow_blank=True)
+                max_redemptions = _parse_positive_int(form.get("max_redemptions"), "מספר מימושים", allow_blank=True)
+                per_user_limit = _parse_positive_int(form.get("per_user_limit"), "מגבלת משתמש")
+                assert per_user_limit is not None
+                code = await bot.services.discount_codes.create_code(
+                    code=str(form.get("code", "")),
+                    description=str(form.get("description", "")).strip() or None,
+                    discount_type=str(form.get("discount_type", "percent")),
+                    amount=str(form.get("amount", "")),
+                    currency=str(form.get("currency", "")).strip() or None,
+                    system_id=system_id,
+                    max_redemptions=max_redemptions,
+                    per_user_limit=per_user_limit,
+                    expires_at=str(form.get("expires_at", "")).strip() or None,
+                    created_by=session.discord_user_id,
+                )
+                notice = f"קוד ההנחה {code.code} נוצר בהצלחה."
+            elif action == "toggle":
+                code_id = _parse_positive_int(form.get("code_id"), "מזהה קוד")
+                assert code_id is not None
+                next_state = str(form.get("next_state", "")).strip().lower() == "true"
+                updated = await bot.services.discount_codes.set_active(code_id, next_state)
+                notice = f"קוד ההנחה {updated.code} {'הופעל' if updated.is_active else 'הושבת'}."
+            elif action == "delete":
+                code_id = _parse_positive_int(form.get("code_id"), "מזהה קוד")
+                assert code_id is not None
+                code = await bot.services.discount_codes.get_code(code_id)
+                await bot.services.discount_codes.delete_code(code_id)
+                notice = f"קוד ההנחה {code.code} נמחק."
+
+        codes = await bot.services.discount_codes.list_codes()
+        system_names = {system.id: system.name for system in systems}
+        code_cards = ''.join(
+            f'''
+            <div class="card stack">
+                <div class="price-list">
+                    <div class="price-item"><strong>{_escape(code.code)}</strong><span>{'<span class="catalog-badge">פעיל</span>' if code.is_active else '<span class="catalog-badge warn">מושבת</span>'}</span></div>
+                    <div class="price-item"><strong>סוג</strong><span>{_escape('אחוזים' if code.discount_type == 'percent' else 'סכום קבוע')}</span></div>
+                    <div class="price-item"><strong>ערך</strong><span>{_escape(code.amount + ('%' if code.discount_type == 'percent' else f' {code.currency or "USD"}'))}</span></div>
+                    <div class="price-item"><strong>מוגבל למערכת</strong><span>{_escape(system_names.get(code.system_id, 'כל המערכות'))}</span></div>
+                    <div class="price-item"><strong>שימושים כוללים</strong><span>{_escape(code.max_redemptions or 'ללא הגבלה')}</span></div>
+                    <div class="price-item"><strong>שימושים למשתמש</strong><span>{code.per_user_limit}</span></div>
+                    <div class="price-item"><strong>תפוגה</strong><span>{_escape(code.expires_at or 'ללא')}</span></div>
+                </div>
+                {f'<p class="muted">{_escape(code.description)}</p>' if code.description else ''}
+                <div class="actions"><form method="post" class="inline-form"><input type="hidden" name="action" value="toggle"><input type="hidden" name="code_id" value="{code.id}"><input type="hidden" name="next_state" value="{'false' if code.is_active else 'true'}"><button type="submit" class="ghost-button">{'השבת' if code.is_active else 'הפעל'}</button></form><form method="post" class="inline-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="code_id" value="{code.id}"><button type="submit" class="ghost-button danger">מחק</button></form></div>
+            </div>
+            '''
+            for code in codes
+        ) or '<div class="empty-card"><p>עדיין לא נוצרו קודי הנחה.</p></div>'
+
+        content = f'''
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <h2>יצירת קוד חדש</h2>
+                <form method="post">
+                    <input type="hidden" name="action" value="create">
+                    <div class="grid">
+                        <label class="field"><span>קוד</span><input type="text" name="code" maxlength="32" required></label>
+                        <label class="field"><span>סוג</span><select name="discount_type"><option value="percent">אחוזים</option><option value="fixed">סכום קבוע</option></select></label>
+                        <label class="field"><span>ערך</span><input type="text" name="amount" inputmode="decimal" required></label>
+                        <label class="field"><span>מטבע</span><input type="text" name="currency" maxlength="3" placeholder="USD"></label>
+                        <label class="field field-wide"><span>תיאור</span><textarea name="description"></textarea></label>
+                        <label class="field"><span>מערכת ספציפית</span><select name="system_id">{_system_options(systems, None)}</select></label>
+                        <label class="field"><span>מגבלת שימוש כוללת</span><input type="number" min="1" name="max_redemptions"></label>
+                        <label class="field"><span>מגבלת שימוש למשתמש</span><input type="number" min="1" name="per_user_limit" value="1" required></label>
+                        <label class="field"><span>תפוגה</span><input type="datetime-local" name="expires_at"></label>
+                    </div>
+                    <div class="actions"><button type="submit">צור קוד</button></div>
+                </form>
+            </div>
+            <div class="card stack">
+                <h2>איך זה עובד</h2>
+                <p>קוד Percent מוריד אחוז מהפריטים הרלוונטיים בקופה. קוד Fixed מוריד סכום קבוע במטבע שתגדיר. אם בוחרים מערכת ספציפית, הקוד יופעל רק כשהיא נמצאת בעגלה.</p>
+            </div>
+        </div>
+        <div class="stack">{code_cards}</div>
+        '''
+        body = _admin_shell(session, current_path=request.path, title="קודי הנחה", intro="יצירה וניהול של קודי הנחה שניתנים למימוש בקופה החדשה של האתר.", content=content)
+        return _page_response("קודי הנחה", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("קודי הנחה", str(exc), status=400)
+
+
+async def admin_notifications_page(request: web.Request) -> web.Response:
+    notice: str | None = None
+    success = True
+    try:
+        bot, session = await _require_admin_session(request)
+        if request.method == "POST":
+            form = await request.post()
+            action = str(form.get("action", "")).strip()
+            if action == "send":
+                user_id = _parse_positive_int(form.get("user_id"), "Discord User ID")
+                assert user_id is not None
+                title = str(form.get("title", "")).strip()
+                body_text = str(form.get("body", "")).strip()
+                link_path = str(form.get("link_path", "")).strip() or None
+                if link_path and not link_path.startswith("/"):
+                    raise PermissionDeniedError("אם מצרפים קישור פנימי, הוא חייב להתחיל ב-/.")
+                notification = await bot.services.notifications.create_notification(
+                    user_id=user_id,
+                    title=title,
+                    body=body_text,
+                    link_path=link_path,
+                    kind="admin",
+                    created_by=session.discord_user_id,
+                )
+                dm_sent = await _send_optional_user_dm(
+                    bot,
+                    user_id=user_id,
+                    title=notification.title,
+                    body=notification.body,
+                    link_path=notification.link_path,
+                )
+                label = await _discord_user_label(bot, user_id)
+                notice = f"ההתראה נשלחה אל {label}." + (" נשלח גם DM." if dm_sent else " נשמרה רק במרכז ההתראות באתר.")
+
+        recent_notifications = await bot.services.notifications.list_recent_notifications(limit=80)
+        labels = await asyncio.gather(*(_discord_user_label(bot, record.user_id) for record in recent_notifications)) if recent_notifications else []
+        history_html = ''.join(
+            f'''
+            <div class="card stack">
+                <div class="price-list">
+                    <div class="price-item"><strong>{_escape(record.title)}</strong><span>{_escape(label)}</span></div>
+                    <div class="price-item"><strong>סוג</strong><span>{_escape(record.kind)}</span></div>
+                    <div class="price-item"><strong>נשלח ב</strong><span>{_escape(record.created_at)}</span></div>
+                    <div class="price-item"><strong>סטטוס קריאה</strong><span>{'נקראה' if record.is_read else 'לא נקראה'}</span></div>
+                    {f'<div class="price-item"><strong>קישור</strong><span>{_escape(record.link_path)}</span></div>' if record.link_path else ''}
+                </div>
+                <p>{_escape(record.body)}</p>
+            </div>
+            '''
+            for record, label in zip(recent_notifications, labels, strict=False)
+        ) or '<div class="empty-card"><p>עדיין אין התראות שנשלחו דרך האתר.</p></div>'
+
+        content = f'''
+        {_notice_html(notice, success=success)}
+        <div class="split-grid">
+            <div class="card stack">
+                <h2>שליחת התראה לפי Discord ID</h2>
+                <form method="post">
+                    <input type="hidden" name="action" value="send">
+                    <div class="grid">
+                        <label class="field"><span>Discord User ID</span><input type="number" min="1" name="user_id" required></label>
+                        <label class="field field-wide"><span>כותרת</span><input type="text" name="title" maxlength="180" required></label>
+                        <label class="field field-wide"><span>הודעה</span><textarea name="body" required></textarea></label>
+                        <label class="field field-wide"><span>קישור פנימי אופציונלי</span><input type="text" name="link_path" placeholder="/inbox"></label>
+                    </div>
+                    <div class="actions"><button type="submit">שלח התראה</button></div>
+                </form>
+            </div>
+            <div class="card stack">
+                <h2>מה המשתמש רואה</h2>
+                <p>כל התראה שנשלחת כאן נשמרת במרכז ההתראות באתר של המשתמש. אם ה-DM פתוח, תישלח גם הודעה פרטית עם אותו תוכן וקישור ישיר במידת הצורך.</p>
+            </div>
+        </div>
+        <div class="stack">{history_html}</div>
+        '''
+        body = _admin_shell(session, current_path=request.path, title="התראות ללקוחות", intro="שליחת הודעות יזומות ללקוחות דרך Discord User ID, יחד עם שמירה קבועה במרכז ההתראות באתר.", content=content)
+        return _page_response("התראות ללקוחות", body)
+    except web.HTTPException:
+        raise
+    except SalesBotError as exc:
+        return _error_response("התראות ללקוחות", str(exc), status=400)
+
+
 async def admin_systems_page(request: web.Request) -> web.Response:
     notice: str | None = None
     success = True
@@ -1071,6 +2554,11 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                     created_by=session.discord_user_id,
                     paypal_link=str(form.get("paypal_link", "")).strip() or None,
                     roblox_gamepass_reference=str(form.get("roblox_gamepass", "")).strip() or None,
+                    website_price=str(form.get("website_price", "")).strip() or None,
+                    website_currency=str(form.get("website_currency", "USD")).strip() or "USD",
+                    is_visible_on_website=str(form.get("is_visible_on_website", "")).strip().lower() in {"1", "true", "yes", "on"},
+                    is_for_sale=str(form.get("is_for_sale", "")).strip().lower() in {"1", "true", "yes", "on"},
+                    is_in_stock=str(form.get("is_in_stock", "")).strip().lower() in {"1", "true", "yes", "on"},
                 )
                 notice = f"המערכת {created_system.name} נוצרה בהצלחה."
             elif action == "delete":
@@ -1102,6 +2590,10 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 <td><strong>{_escape(system.name)}</strong><br><span class="muted">{_escape(system.description[:120])}</span></td>
                 <td>{_escape(system.paypal_link or 'לא מוגדר')}</td>
                 <td>{_escape(system.roblox_gamepass_id or 'לא מוגדר')}</td>
+                <td>{_escape(f"{system.website_price} {system.website_currency}" if system.website_price else 'לא מוגדר')}</td>
+                <td>{'כן' if system.is_visible_on_website else 'לא'}</td>
+                <td>{'כן' if system.is_for_sale else 'לא'}</td>
+                <td>{'כן' if system.is_in_stock else 'לא'}</td>
                 <td>
                     <div class="actions">
                         <a class="link-button ghost-button" href="/admin/systems/{system.id}/edit">עריכה</a>
@@ -1122,10 +2614,15 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                     <div class="grid">
                         <label class="field field-wide"><span>שם</span><input type="text" name="name" required></label>
                         <label class="field field-wide"><span>תיאור</span><textarea name="description" required></textarea></label>
-                        <label class="field"><span>PayPal Link</span><input type="url" name="paypal_link"></label>
-                        <label class="field"><span>Roblox Gamepass</span><input type="text" name="roblox_gamepass"></label>
+                        <label class="field"><span>קישור פייפאל</span><input type="url" name="paypal_link"></label>
+                        <label class="field"><span>גיימפאס רובקס</span><input type="text" name="roblox_gamepass"></label>
+                        <label class="field"><span>מחיר באתר</span><input type="text" name="website_price" inputmode="decimal" placeholder="19.99"></label>
+                        <label class="field"><span>מטבע</span><input type="text" name="website_currency" maxlength="3" value="USD"></label>
                         <label class="field"><span>קובץ מערכת</span><input type="file" name="file" required></label>
                         <label class="field"><span>תמונה</span><input type="file" name="image" accept="image/*"></label>
+                        <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_visible_on_website" value="true" checked><strong>להציג את המערכת באתר</strong></span></label>
+                        <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_for_sale" value="true" checked><strong>להציג את המערכת למכירה</strong></span></label>
+                        <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_in_stock" value="true" checked><strong>המערכת במלאי</strong></span></label>
                     </div>
                     <div class="actions"><button type="submit">צור מערכת</button></div>
                 </form>
@@ -1155,7 +2652,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                 </div>
             </div>
         </div>
-        <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>PayPal</th><th>גיימפאס</th><th>פעולות</th></tr></thead><tbody>{system_rows}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>מערכת</th><th>פייפאל</th><th>גיימפאס</th><th>מחיר</th><th>מוצג באתר</th><th>למכירה</th><th>במלאי</th><th>פעולות</th></tr></thead><tbody>{system_rows}</tbody></table></div>
         """
         body = _admin_shell(session, current_path=request.path, title="ניהול מערכות", intro="יצירה, עריכה, מחיקה ומתן/הסרה של מערכות דרך האתר.", content=content)
         return _page_response("ניהול מערכות", body)
@@ -1801,10 +3298,12 @@ async def custom_orders_page(request: web.Request) -> web.Response:
     try:
         bot_ref, session = await _current_site_session(request)
         bot = bot_ref
+        if session is not None:
+            await _ensure_site_session_allowed(bot, session)
 
         if request.method == "POST":
             try:
-                bot, session = await _require_site_session(request)
+                bot, session = await _require_active_site_session(request)
                 form = await request.post()
                 requested_item = str(form.get("requested_item", "")).strip()
                 required_timeframe = str(form.get("required_timeframe", "")).strip()
@@ -1848,6 +3347,7 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                 """
                 body = _public_shell(
                     session,
+                    current_path="/custom-orders",
                     title="הזמנה אישית",
                     intro="ההזמנה שלך נשמרה ונשלחה לבעלים.",
                     login_path="/custom-orders",
@@ -1894,6 +3394,7 @@ async def custom_orders_page(request: web.Request) -> web.Response:
         """
         body = _public_shell(
             session,
+            current_path="/custom-orders",
             title="הזמנה אישית",
             intro="שלח כאן הזמנה אישית חדשה במקום הטופס הישן של Discord.",
             login_path="/custom-orders",
@@ -1920,10 +3421,12 @@ async def account_payment_page(request: web.Request) -> web.Response:
     try:
         bot_ref, session = await _current_site_session(request)
         bot = bot_ref
+        if session is not None:
+            await _ensure_site_session_allowed(bot, session)
 
         if request.method == "POST":
             try:
-                bot, session = await _require_site_session(request)
+                bot, session = await _require_active_site_session(request)
                 form = await request.post()
                 roblox_username = str(form.get("roblox_username", "")).strip()
                 roblox_password = str(form.get("roblox_password", "")).strip()
@@ -1961,6 +3464,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
                 """
                 body = _public_shell(
                     session,
+                    current_path="/account-payment",
                     title="שליחת משתמש בתור תשלום",
                     intro="הטופס נשלח לאדמינים בהצלחה.",
                     login_path="/account-payment",
@@ -2025,6 +3529,7 @@ async def account_payment_page(request: web.Request) -> web.Response:
         """
         body = _public_shell(
             session,
+            current_path="/account-payment",
             title="שליחת משתמש בתור תשלום",
             intro="שלח כאן את פרטי המשתמש שאתה מביא כתשלום, אחרי התחברות עם Discord.",
             login_path="/account-payment",
@@ -2048,17 +3553,15 @@ async def special_system_page(request: web.Request) -> web.Response:
         bot: SalesBot = request.app["bot"]
         special_system = await bot.services.special_systems.get_special_system_by_slug(request.match_info["slug"])
         images = await bot.services.special_systems.list_special_system_images(special_system.id)
-        bot_ref, session = await _current_site_session(request)
+        bot_ref, session = await _require_active_site_session(request)
         assert bot_ref is bot
         linked_account: RobloxLinkRecord | None = None
-        if session is not None:
-            discord_name = _session_label(session)
-            try:
-                linked_account = await bot.services.oauth.get_link(session.discord_user_id)
-            except NotFoundError:
-                linked_account = None
+        discord_name = _session_label(session)
+        try:
+            linked_account = await bot.services.oauth.get_link(session.discord_user_id)
+        except NotFoundError:
+            linked_account = None
         if request.method == "POST":
-            bot, session = await _require_site_session(request)
             form = await request.post()
             selected_payment_method = str(form.get("payment_method", "")).strip()
             discord_name = str(form.get("discord_name", "")).strip()
@@ -2090,6 +3593,7 @@ async def special_system_page(request: web.Request) -> web.Response:
             """
             body = _public_shell(
                 session,
+                current_path="/special-systems",
                 title=f"הזמנה מיוחדת - {special_system.title}",
                 intro="הבקשה שלך התקבלה ונשמרה בבוט.",
                 login_path=f"/special-systems/{special_system.slug}",
@@ -2127,6 +3631,7 @@ async def special_system_page(request: web.Request) -> web.Response:
         """
         body = _public_shell(
             session,
+            current_path="/special-systems",
             title=f"הזמנה מיוחדת - {special_system.title}",
             intro="מלא את כל הפרטים כדי לשלוח בקשה חדשה לבוט. כל השדות חובה.",
             login_path=f"/special-systems/{special_system.slug}",

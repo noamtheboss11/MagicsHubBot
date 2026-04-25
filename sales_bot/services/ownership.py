@@ -372,6 +372,7 @@ class OwnershipService:
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
+        row_keys = set(row.keys())
         return SystemRecord(
             id=int(row["id"]),
             name=str(row["name"]),
@@ -380,6 +381,11 @@ class OwnershipService:
             image_path=str(row["image_path"]) if row["image_path"] else None,
             paypal_link=str(row["paypal_link"]) if row["paypal_link"] else None,
             roblox_gamepass_id=str(row["roblox_gamepass_id"]) if row["roblox_gamepass_id"] else None,
+            is_visible_on_website=bool(row["is_visible_on_website"]) if "is_visible_on_website" in row_keys else True,
+            is_for_sale=bool(row["is_for_sale"]) if "is_for_sale" in row_keys else True,
+            is_in_stock=bool(row["is_in_stock"]) if "is_in_stock" in row_keys else True,
+            website_price=(str(row["website_price"]) if "website_price" in row_keys and row["website_price"] else None),
+            website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "USD"),
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
         )

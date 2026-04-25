@@ -12,6 +12,11 @@ class SystemRecord:
     image_path: str | None
     paypal_link: str | None
     roblox_gamepass_id: str | None
+    is_visible_on_website: bool
+    is_for_sale: bool
+    is_in_stock: bool
+    website_price: str | None
+    website_currency: str
     created_by: int | None
     created_at: str
 
@@ -45,6 +50,7 @@ class SavedSystemRecord:
 class BlacklistEntry:
     user_id: int
     display_label: str
+    reason: str
     blacklisted_by: int | None
     blacklisted_at: str
 
@@ -71,6 +77,74 @@ class PurchaseRecord:
     paypal_link: str
     created_at: str
     completed_at: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class CartItemRecord:
+    user_id: int
+    system: SystemRecord
+    added_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class CheckoutOrderRecord:
+    id: int
+    user_id: int
+    payment_method: str
+    status: str
+    discount_code_id: int | None
+    discount_code_text: str | None
+    subtotal_amount: str
+    discount_amount: str
+    total_amount: str
+    currency: str
+    note: str | None
+    reviewed_at: str | None
+    reviewed_by: int | None
+    completed_at: str | None
+    cancelled_at: str | None
+    cancel_reason: str | None
+    created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class CheckoutOrderItemRecord:
+    order_id: int
+    system_id: int
+    system_name: str
+    unit_price: str
+    line_total: str
+
+
+@dataclass(slots=True, frozen=True)
+class DiscountCodeRecord:
+    id: int
+    code: str
+    description: str | None
+    discount_type: str
+    amount: str
+    currency: str | None
+    system_id: int | None
+    max_redemptions: int | None
+    per_user_limit: int
+    is_active: bool
+    expires_at: str | None
+    created_by: int | None
+    created_at: str
+
+
+@dataclass(slots=True, frozen=True)
+class NotificationRecord:
+    id: int
+    user_id: int
+    title: str
+    body: str
+    link_path: str | None
+    kind: str
+    is_read: bool
+    created_by: int | None
+    created_at: str
+    read_at: str | None
 
 
 @dataclass(slots=True, frozen=True)

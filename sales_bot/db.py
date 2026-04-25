@@ -54,6 +54,12 @@ class Database:
 
     async def _run_migrations(self) -> None:
         await self._ensure_column("systems", "roblox_gamepass_id", "TEXT")
+        await self._ensure_column("systems", "is_visible_on_website", "BOOLEAN NOT NULL DEFAULT TRUE")
+        await self._ensure_column("systems", "is_for_sale", "BOOLEAN NOT NULL DEFAULT TRUE")
+        await self._ensure_column("systems", "is_in_stock", "BOOLEAN NOT NULL DEFAULT TRUE")
+        await self._ensure_column("systems", "website_price", "TEXT")
+        await self._ensure_column("systems", "website_currency", "TEXT NOT NULL DEFAULT 'USD'")
+        await self._ensure_column("blacklist_entries", "reason", "TEXT NOT NULL DEFAULT ''")
         await self._ensure_column("order_requests", "roblox_username", "TEXT")
         await self._ensure_column("order_requests", "admin_reply", "TEXT")
 

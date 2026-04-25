@@ -57,7 +57,7 @@ function removeOptionRow(button) {
 def admin_html_response(title: str, body: str) -> web.Response:
     content = f"""
     <!doctype html>
-    <html lang="en">
+    <html lang="he" dir="rtl">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -170,7 +170,7 @@ def admin_html_response(title: str, body: str) -> web.Response:
             body {{
                 margin: 0;
                 min-height: 100vh;
-                font-family: Bahnschrift, "Aptos", "Trebuchet MS", sans-serif;
+                font-family: "Segoe UI", Arial, sans-serif;
                 color: var(--text);
                 background:
                     radial-gradient(circle at 18% 10%, var(--bg-radial-1), transparent 34%),
@@ -247,7 +247,6 @@ def admin_html_response(title: str, body: str) -> web.Response:
                 color: var(--muted);
                 font-size: 0.72rem;
                 letter-spacing: 0.12em;
-                text-transform: uppercase;
             }}
             .utility-actions {{
                 display: inline-flex;
@@ -259,7 +258,6 @@ def admin_html_response(title: str, body: str) -> web.Response:
                 color: var(--muted);
                 font-size: 0.8rem;
                 letter-spacing: 0.12em;
-                text-transform: uppercase;
             }}
             .theme-toolbar {{
                 display: inline-flex;
@@ -471,11 +469,11 @@ def admin_html_response(title: str, body: str) -> web.Response:
             <div class="page-utility">
                 <a class="brand-mark" href="/">
                     <span class="brand-mark__dot"></span>
-                    <span>Magic Studio's<small>Web Portal</small></span>
+                    <span>Magic Studio's<small>דף בית</small></span>
                 </a>
                 <div class="utility-actions">
-                    <span class="utility-label">Display</span>
-                    <div class="theme-toolbar" role="group" aria-label="Theme selection">
+                    <span class="utility-label">תצוגה</span>
+                    <div class="theme-toolbar" role="group" aria-label="בחירת ערכת נושא">
                         <button type="button" class="theme-pill" data-theme-mode="default">ברירת מחדל</button>
                         <button type="button" class="theme-pill" data-theme-mode="dark">כהה</button>
                         <button type="button" class="theme-pill" data-theme-mode="light">בהיר</button>
@@ -936,6 +934,11 @@ def _system_values_from_record(system: Any) -> dict[str, Any]:
         "description": system.description,
         "paypal_link": system.paypal_link or "",
         "roblox_gamepass": system.roblox_gamepass_id or "",
+        "website_price": system.website_price or "",
+        "website_currency": system.website_currency or "USD",
+        "is_visible_on_website": system.is_visible_on_website,
+        "is_for_sale": system.is_for_sale,
+        "is_in_stock": system.is_in_stock,
         "clear_image": False,
     }
 
@@ -946,6 +949,11 @@ def _extract_system_form_values(post_data: Any) -> dict[str, Any]:
         "description": str(post_data.get("description", "")),
         "paypal_link": str(post_data.get("paypal_link", "")),
         "roblox_gamepass": str(post_data.get("roblox_gamepass", "")),
+        "website_price": str(post_data.get("website_price", "")),
+        "website_currency": str(post_data.get("website_currency", "USD")),
+        "is_visible_on_website": str(post_data.get("is_visible_on_website", "")).lower() in {"1", "true", "yes", "on"},
+        "is_for_sale": str(post_data.get("is_for_sale", "")).lower() in {"1", "true", "yes", "on"},
+        "is_in_stock": str(post_data.get("is_in_stock", "")).lower() in {"1", "true", "yes", "on"},
         "clear_image": str(post_data.get("clear_image", "")).lower() in {"1", "true", "yes", "on"},
     }
 
@@ -966,51 +974,77 @@ def _render_system_form(
     error_text: str | None = None,
 ) -> str:
     error_html = f'<div class="notice">{_escape(error_text)}</div>' if error_text else ""
-    current_image = f"<p>Current image: {_escape(system.image_path)}</p>" if system.image_path else "<p>No current image.</p>"
+    current_image = f"<p>תמונה נוכחית: {_escape(system.image_path)}</p>" if system.image_path else "<p>אין כרגע תמונה שמורה.</p>"
     return f"""
-    <p class="eyebrow">Admin System Editor</p>
-    <h1>Edit System #{_escape(system.id)}</h1>
-    <p>Update the text fields below or replace the stored file/image uploads.</p>
+    <p class="eyebrow">פאנל מערכות</p>
+    <h1>עריכת מערכת #{_escape(system.id)}</h1>
+    <p>אפשר לעדכן כאן את הטקסט, ההעלאות והגדרות החשיפה של המערכת באתר.</p>
     {error_html}
     <div class="meta-card">
-        <p><strong>Current file:</strong> {_escape(system.file_path)}</p>
+        <p><strong>קובץ נוכחי:</strong> {_escape(system.file_path)}</p>
         {current_image}
     </div>
     <form method="post" enctype="multipart/form-data">
         <div class="grid">
             <label class="field field-wide">
-                <span>Name</span>
+                <span>שם</span>
                 <input type="text" maxlength="180" name="name" value="{_escape(values['name'])}" required>
             </label>
             <label class="field field-wide">
-                <span>Description</span>
+                <span>תיאור</span>
                 <textarea name="description" required>{_escape(values['description'])}</textarea>
             </label>
             <label class="field">
-                <span>PayPal Link</span>
+                <span>קישור פייפאל</span>
                 <input type="url" name="paypal_link" value="{_escape(values['paypal_link'])}">
             </label>
             <label class="field">
-                <span>Roblox Gamepass ID or URL</span>
+                <span>מזהה או קישור גיימפאס רובקס</span>
                 <input type="text" name="roblox_gamepass" value="{_escape(values['roblox_gamepass'])}">
             </label>
             <label class="field">
-                <span>Replace File</span>
+                <span>מחיר באתר</span>
+                <input type="text" name="website_price" inputmode="decimal" placeholder="19.99" value="{_escape(values['website_price'])}">
+            </label>
+            <label class="field">
+                <span>מטבע</span>
+                <input type="text" name="website_currency" maxlength="3" placeholder="USD" value="{_escape(values['website_currency'])}">
+            </label>
+            <label class="field">
+                <span>החלפת קובץ מערכת</span>
                 <input type="file" name="file">
             </label>
             <label class="field">
-                <span>Replace Image</span>
+                <span>החלפת תמונה</span>
                 <input type="file" name="image" accept="image/*">
+            </label>
+            <label class="meta-card check-card">
+                <span class="check-line">
+                    <input type="checkbox" name="is_visible_on_website" value="true"{' checked' if values['is_visible_on_website'] else ''}>
+                    <strong>להציג את המערכת באתר</strong>
+                </span>
+            </label>
+            <label class="meta-card check-card">
+                <span class="check-line">
+                    <input type="checkbox" name="is_for_sale" value="true"{' checked' if values['is_for_sale'] else ''}>
+                    <strong>המערכת מוצעת כרגע למכירה</strong>
+                </span>
+            </label>
+            <label class="meta-card check-card">
+                <span class="check-line">
+                    <input type="checkbox" name="is_in_stock" value="true"{' checked' if values['is_in_stock'] else ''}>
+                    <strong>המערכת במלאי</strong>
+                </span>
             </label>
             <label class="field field-wide">
                 <span>
                     <input type="checkbox" name="clear_image" value="true"{' checked' if values['clear_image'] else ''}>
-                    Remove the stored image entirely
+                    למחוק לגמרי את התמונה השמורה
                 </span>
             </label>
         </div>
         <div class="actions">
-            <button type="submit">Save System Changes</button>
+            <button type="submit">שמור שינויים</button>
         </div>
     </form>
     """
@@ -1073,27 +1107,32 @@ async def system_edit_page(request: web.Request) -> web.Response:
                     description=values["description"],
                     paypal_link=values["paypal_link"] or None,
                     roblox_gamepass_reference=values["roblox_gamepass"] or None,
+                    website_price=values["website_price"] or None,
+                    website_currency=values["website_currency"] or "USD",
+                    is_visible_on_website=bool(values["is_visible_on_website"]),
+                    is_for_sale=bool(values["is_for_sale"]),
+                    is_in_stock=bool(values["is_in_stock"]),
                     file_upload=_extract_upload(form_data.get("file")),
                     image_upload=_extract_upload(image_field),
                     clear_image=bool(values["clear_image"]),
                 )
                 return admin_html_response(
-                    "System Updated",
+                    "המערכת עודכנה",
                     _render_success_body(
-                        f"System #{updated_system.id} Updated",
-                        f"{updated_system.name} was updated successfully.",
+                        f"מערכת #{updated_system.id} עודכנה",
+                        f"{updated_system.name} עודכנה בהצלחה.",
                         record_id=updated_system.id,
                         message_url=None,
                     ),
                 )
             except SalesBotError as exc:
                 return admin_html_response(
-                    f"Edit System #{system.id}",
+                    f"עריכת מערכת #{system.id}",
                     _render_system_form(system=system, values=values, error_text=str(exc)),
                 )
 
         return admin_html_response(
-            f"Edit System #{system.id}",
+            f"עריכת מערכת #{system.id}",
             _render_system_form(system=system, values=values),
         )
     except SalesBotError as exc:

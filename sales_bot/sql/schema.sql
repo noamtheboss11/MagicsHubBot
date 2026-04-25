@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS systems (
     file_path TEXT NOT NULL,
     paypal_link TEXT,
     roblox_gamepass_id TEXT,
+    is_visible_on_website BOOLEAN NOT NULL DEFAULT 1,
+    is_for_sale BOOLEAN NOT NULL DEFAULT 1,
+    is_in_stock BOOLEAN NOT NULL DEFAULT 1,
+    website_price TEXT,
+    website_currency TEXT NOT NULL DEFAULT 'USD',
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -70,6 +75,7 @@ CREATE TABLE IF NOT EXISTS delivery_messages (
 CREATE TABLE IF NOT EXISTS blacklist_entries (
     user_id INTEGER PRIMARY KEY,
     display_label TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
     blacklisted_by INTEGER,
     blacklisted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -211,6 +217,87 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_cart_items (
+    user_id INTEGER NOT NULL,
+    system_id INTEGER NOT NULL,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, system_id),
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS discount_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description TEXT,
+    discount_type TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    currency TEXT,
+    system_id INTEGER,
+    max_redemptions INTEGER,
+    per_user_limit INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT 1,
+    expires_at TEXT,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_checkout_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    payment_method TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    discount_code_id INTEGER,
+    discount_code_text TEXT,
+    subtotal_amount TEXT NOT NULL,
+    discount_amount TEXT NOT NULL DEFAULT '0.00',
+    total_amount TEXT NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    note TEXT,
+    reviewed_at TEXT,
+    reviewed_by INTEGER,
+    completed_at TEXT,
+    cancelled_at TEXT,
+    cancel_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_checkout_order_items (
+    order_id INTEGER NOT NULL,
+    system_id INTEGER NOT NULL,
+    system_name TEXT NOT NULL,
+    unit_price TEXT NOT NULL,
+    line_total TEXT NOT NULL,
+    PRIMARY KEY (order_id, system_id),
+    FOREIGN KEY (order_id) REFERENCES website_checkout_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS discount_code_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discount_code_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    order_id INTEGER NOT NULL,
+    discount_amount TEXT NOT NULL,
+    redeemed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (discount_code_id) REFERENCES discount_codes(id) ON DELETE CASCADE,
+    FOREIGN KEY (order_id) REFERENCES website_checkout_orders(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS website_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    link_path TEXT,
+    kind TEXT NOT NULL DEFAULT 'general',
+    is_read BOOLEAN NOT NULL DEFAULT 0,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    read_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS special_systems (

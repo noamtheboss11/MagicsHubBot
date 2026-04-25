@@ -61,20 +61,22 @@ class BlacklistCog(commands.Cog):
     def __init__(self, bot: SalesBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="blacklist", description="Blacklist a user and remove prior delivered system messages.")
-    @app_commands.describe(user="User to blacklist.")
+    @app_commands.command(name="blacklist", description="הכנסת משתמש לבלאקליסט ומחיקת הודעות המסירה הישנות שלו.")
+    @app_commands.describe(user="המשתמש שיוכנס לבלאקליסט.", reason="הסיבה שתישמר ותוצג באתר.")
     @admin_only()
-    async def blacklist(self, interaction: discord.Interaction, user: discord.User) -> None:
+    async def blacklist(self, interaction: discord.Interaction, user: discord.User, reason: str) -> None:
         entry = await self.bot.services.blacklist.add_entry(
             user.id,
             self.bot.services.blacklist.build_display_label(user.id),
+            reason,
             interaction.user.id,
         )
         deleted_messages = await self.bot.services.delivery.purge_deliveries(self.bot, user_id=user.id)
         await interaction.response.send_message(
             (
                 f"המשתמש {entry.display_label} נוסף לבלאקליסט. "
-                f"נמחקו {deleted_messages} הודעות מערכת שנמסרו קודם."
+                f"נמחקו {deleted_messages} הודעות מערכת שנמסרו קודם. "
+                f"סיבה: {entry.reason or 'לא נמסרה.'}"
             ),
             ephemeral=True,
         )
@@ -95,6 +97,7 @@ class BlacklistCog(commands.Cog):
             selected_entry = entry
             embed = discord.Embed(title="אישור הסרת בלאקליסט", color=discord.Color.orange())
             embed.add_field(name="משתמש", value=selected_entry.display_label, inline=False)
+            embed.add_field(name="סיבה", value=selected_entry.reason or "לא נמסרה", inline=False)
             embed.add_field(name="תאריך הוספה לבלאקליסט", value=selected_entry.blacklisted_at, inline=False)
 
             async def on_confirm(confirm_interaction: discord.Interaction, view: ConfirmView) -> None:

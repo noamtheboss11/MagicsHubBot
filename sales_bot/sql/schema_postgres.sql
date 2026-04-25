@@ -12,6 +12,11 @@ CREATE TABLE IF NOT EXISTS systems (
     file_path TEXT NOT NULL,
     paypal_link TEXT,
     roblox_gamepass_id TEXT,
+    is_visible_on_website BOOLEAN NOT NULL DEFAULT TRUE,
+    is_for_sale BOOLEAN NOT NULL DEFAULT TRUE,
+    is_in_stock BOOLEAN NOT NULL DEFAULT TRUE,
+    website_price NUMERIC(12, 2),
+    website_currency TEXT NOT NULL DEFAULT 'USD',
     created_by BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -64,6 +69,7 @@ CREATE TABLE IF NOT EXISTS delivery_messages (
 CREATE TABLE IF NOT EXISTS blacklist_entries (
     user_id BIGINT PRIMARY KEY,
     display_label TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
     blacklisted_by BIGINT,
     blacklisted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -202,6 +208,80 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS website_cart_items (
+    user_id BIGINT NOT NULL,
+    system_id BIGINT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, system_id)
+);
+
+CREATE TABLE IF NOT EXISTS discount_codes (
+    id BIGSERIAL PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    description TEXT,
+    discount_type TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    currency TEXT,
+    system_id BIGINT REFERENCES systems(id) ON DELETE SET NULL,
+    max_redemptions INTEGER,
+    per_user_limit INTEGER NOT NULL DEFAULT 1,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at TIMESTAMPTZ,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS website_checkout_orders (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    payment_method TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    discount_code_id BIGINT REFERENCES discount_codes(id) ON DELETE SET NULL,
+    discount_code_text TEXT,
+    subtotal_amount NUMERIC(12, 2) NOT NULL,
+    discount_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    total_amount NUMERIC(12, 2) NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    note TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewed_by BIGINT,
+    completed_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    cancel_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS website_checkout_order_items (
+    order_id BIGINT NOT NULL REFERENCES website_checkout_orders(id) ON DELETE CASCADE,
+    system_id BIGINT NOT NULL REFERENCES systems(id) ON DELETE CASCADE,
+    system_name TEXT NOT NULL,
+    unit_price NUMERIC(12, 2) NOT NULL,
+    line_total NUMERIC(12, 2) NOT NULL,
+    PRIMARY KEY (order_id, system_id)
+);
+
+CREATE TABLE IF NOT EXISTS discount_code_redemptions (
+    id BIGSERIAL PRIMARY KEY,
+    discount_code_id BIGINT NOT NULL REFERENCES discount_codes(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL,
+    order_id BIGINT NOT NULL REFERENCES website_checkout_orders(id) ON DELETE CASCADE,
+    discount_amount NUMERIC(12, 2) NOT NULL,
+    redeemed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS website_notifications (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    link_path TEXT,
+    kind TEXT NOT NULL DEFAULT 'general',
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS special_systems (

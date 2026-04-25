@@ -6,10 +6,10 @@ from discord.ext import commands
 
 from sales_bot.bot import SalesBot
 from sales_bot.checks import admin_only
-from sales_bot.exceptions import ExternalServiceError, NotFoundError, PermissionDeniedError
+from sales_bot.exceptions import NotFoundError, PermissionDeniedError
 from sales_bot.models import SystemRecord
 from sales_bot.services.ownership import CLAIMABLE_ROLE_ID
-from sales_bot.ui.common import ConfirmView, PaginatedSelectView, edit_interaction_response
+from sales_bot.ui.common import ConfirmView, edit_interaction_response
 from sales_bot.ui.ownership import ClaimRolePanelView, build_system_names
 
 
@@ -68,122 +68,6 @@ class OwnershipCog(commands.Cog):
             empty_text="למשתמש הזה אין כרגע מערכות בבעלות.",
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="getsystem", description="קבלת מערכת אם היא כבר בבעלותך או אם החשבון המקושר שלך מחזיק בגיימפאס המתאים.")
-    async def getsystem(self, interaction: discord.Interaction) -> None:
-        if not interaction.response.is_done():
-            try:
-                await interaction.response.defer(ephemeral=True)
-            except discord.HTTPException as exc:
-                if exc.code != 40060:
-                    raise
-
-        systems = await self.bot.services.ownership.list_getsystem_available_systems(self.bot, interaction.user.id)
-        if not systems:
-            await interaction.followup.send("כרגע אין מערכות זמינות בבוט.", ephemeral=True)
-            return
-
-        async def on_selected(
-            select_interaction: discord.Interaction,
-            system: object,
-            parent_view: PaginatedSelectView,
-        ) -> None:
-            selected_system = system
-
-            synced_systems = await self.bot.services.ownership.sync_linked_gamepass_ownerships(
-                self.bot,
-                interaction.user.id,
-                system_ids={selected_system.id},
-            )
-            synced_now = any(synced_system.id == selected_system.id for synced_system in synced_systems)
-
-            already_owned = await self.bot.services.ownership.user_owns_system(interaction.user.id, selected_system.id)
-            is_transfer_locked = await self.bot.services.ownership.is_transfer_locked(interaction.user.id, selected_system.id)
-
-            if already_owned:
-                await self.bot.services.delivery.deliver_system(
-                    self.bot,
-                    interaction.user,
-                    selected_system,
-                    source="owned-system-redownload",
-                    granted_by=None,
-                    record_ownership=False,
-                )
-                await self.bot.services.ownership.refresh_claim_role_membership(
-                    self.bot,
-                    interaction.user.id,
-                    guild=select_interaction.guild,
-                    sync_ownerships=False,
-                )
-                success_message = (
-                    f"המערכת **{selected_system.name}** נשלחה אליך ב-DM כי הגיימפאס אומת ונשמר בבעלות שלך."
-                    if synced_now
-                    else f"המערכת **{selected_system.name}** נשלחה אליך שוב ב-DM כי היא כבר רשומה בבעלותך."
-                )
-                await edit_interaction_response(
-                    select_interaction,
-                    content=success_message,
-                    embed=None,
-                    view=None,
-                )
-                return
-
-            if is_transfer_locked:
-                raise PermissionDeniedError("המערכת הזאת הועברה מחשבון זה ולכן אי אפשר לקבל אותה שוב דרך הפקודה הזאת.")
-
-            if not selected_system.roblox_gamepass_id:
-                raise PermissionDeniedError("למערכת הזאת עדיין לא הוגדר גיימפאס Roblox, לכן אי אפשר לקבל אותה דרך הפקודה הזאת.")
-
-            if self.bot.http_session is None:
-                raise ExternalServiceError("חיבור הרשת של הבוט לא זמין כרגע. נסה שוב בעוד רגע.")
-
-            try:
-                await self.bot.services.oauth.get_link(interaction.user.id)
-            except NotFoundError as exc:
-                raise PermissionDeniedError(
-                    "כדי לקבל מערכת חדשה דרך הפקודה הזאת צריך קודם לקשר חשבון רובלוקס עם `/link`. "
-                    "אם המערכת כבר בבעלותך, אפשר להוריד אותה מחדש גם בלי גיימפאס."
-                ) from exc
-
-            owns_gamepass = await self.bot.services.oauth.linked_user_owns_gamepass(
-                self.bot.http_session,
-                discord_user_id=interaction.user.id,
-                gamepass_id=selected_system.roblox_gamepass_id,
-            )
-            if not owns_gamepass:
-                raise PermissionDeniedError("לפי בדיקת Roblox, החשבון המקושר שלך לא מחזיק בגיימפאס של המערכת הזאת.")
-
-            await self.bot.services.delivery.deliver_system(
-                self.bot,
-                interaction.user,
-                selected_system,
-                source=self.bot.services.ownership.ROBLOX_CLAIM_SOURCE,
-                granted_by=None,
-            )
-            await edit_interaction_response(
-                select_interaction,
-                content=f"המערכת **{selected_system.name}** נשלחה אליך ב-DM כי הגיימפאס אומת בהצלחה.",
-                embed=None,
-                view=None,
-            )
-
-        view = PaginatedSelectView(
-            actor_id=interaction.user.id,
-            items=systems,
-            placeholder="בחר מערכת לבדיקה וקבלה",
-            option_builder=lambda system: discord.SelectOption(
-                label=system.name[:100],
-                description=system.description[:100],
-                value=str(system.id),
-            ),
-            value_getter=lambda system: str(system.id),
-            on_selected=on_selected,
-        )
-        await interaction.followup.send(
-            "בחר את המערכת שתרצה לבדוק מולה את הגיימפאס של החשבון המקושר שלך.",
-            view=view,
-            ephemeral=True,
-        )
 
     @app_commands.command(name="givesystem", description="תצוגה מקדימה ואישור שליחת מערכת למשתמש.")
     @app_commands.describe(user="המשתמש שיקבל את המערכת.", system="המערכת שתרצה לתת.")
@@ -380,7 +264,7 @@ class OwnershipCog(commands.Cog):
             summary_embed.add_field(name="העברה", value=f"{from_user.mention} -> {to_user.mention}", inline=False)
             summary_embed.add_field(name="הודעות DM שנמחקו", value=str(deleted_messages), inline=False)
 
-            content = "ההעברה הושלמה בהצלחה. המשתמש הישן לא יוכל לקבל שוב את המערכות שהועברו דרך `/getsystem`."
+            content = "ההעברה הושלמה בהצלחה. המשתמש הישן לא יוכל לקבל שוב את המערכות שהועברו דרך האתר או דרך שחזורי בעלות עתידיים."
             if dm_failures:
                 content += f" לא הצלחתי לשלוח הודעת DM אל: {', '.join(dm_failures)}."
 

@@ -8,7 +8,7 @@ from sales_bot.ui.common import RestrictedView, defer_interaction_response, edit
 class AppealActionButton(discord.ui.Button["AppealDecisionView"]):
     def __init__(self, action: str, appeal_id: int) -> None:
         super().__init__(
-            label="Accept" if action == "accept" else "Reject",
+            label="אישור" if action == "accept" else "דחייה",
             style=discord.ButtonStyle.success if action == "accept" else discord.ButtonStyle.danger,
             custom_id=f"appeal:{action}:{appeal_id}",
         )
@@ -42,9 +42,9 @@ class AppealDecisionView(RestrictedView):
         )
 
         decision_text = (
-            "Your blacklist appeal was accepted and your blacklist entry has been removed."
+            "הערעור שלך התקבל והבלאקליסט הוסר מהחשבון שלך."
             if action == "accept"
-            else "Your blacklist appeal was rejected."
+            else "הערעור שלך נדחה."
         )
 
         try:
@@ -56,8 +56,8 @@ class AppealDecisionView(RestrictedView):
         embed = interaction.message.embeds[0].copy() if interaction.message and interaction.message.embeds else discord.Embed()
         embed.color = discord.Color.green() if action == "accept" else discord.Color.red()
         embed.add_field(
-            name="Decision",
-            value=f"{appeal.status.title()} by <@{interaction.user.id}>",
+            name="החלטה",
+            value=f"{('התקבל' if appeal.status == 'accepted' else 'נדחה')} על ידי <@{interaction.user.id}>",
             inline=False,
         )
         self.disable_all_items()

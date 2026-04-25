@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 import re
 from pathlib import Path
@@ -10,7 +11,7 @@ import aiosqlite
 import discord
 
 from sales_bot.db import Database
-from sales_bot.exceptions import AlreadyExistsError, NotFoundError
+from sales_bot.exceptions import AlreadyExistsError, NotFoundError, PermissionDeniedError
 from sales_bot.models import SystemAssetRecord, SystemRecord
 from sales_bot.storage import remove_path, save_named_bytes, slugify
 
@@ -34,6 +35,11 @@ class SystemService:
         created_by: int,
         paypal_link: str | None,
         roblox_gamepass_reference: str | None,
+        is_visible_on_website: bool = True,
+        is_for_sale: bool = True,
+        is_in_stock: bool = True,
+        website_price: str | None = None,
+        website_currency: str = "USD",
     ) -> SystemRecord:
         file_bytes = await file_attachment.read()
         image_upload: tuple[str, bytes] | None = None
@@ -47,6 +53,11 @@ class SystemService:
             created_by=created_by,
             paypal_link=paypal_link,
             roblox_gamepass_reference=roblox_gamepass_reference,
+            is_visible_on_website=is_visible_on_website,
+            is_for_sale=is_for_sale,
+            is_in_stock=is_in_stock,
+            website_price=website_price,
+            website_currency=website_currency,
         )
 
     async def create_system_from_uploads(
@@ -59,6 +70,11 @@ class SystemService:
         created_by: int,
         paypal_link: str | None,
         roblox_gamepass_reference: str | None,
+        is_visible_on_website: bool = True,
+        is_for_sale: bool = True,
+        is_in_stock: bool = True,
+        website_price: str | None = None,
+        website_currency: str = "USD",
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{uuid4().hex[:12]}"
         file_name, file_bytes = file_upload
@@ -73,14 +89,29 @@ class SystemService:
             safe_image_name = Path(image_name).name or image_path.name
 
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
+        normalized_website_price = self.normalize_website_price(website_price)
+        normalized_website_currency = self.normalize_website_currency(website_currency)
         await self._ensure_gamepass_not_in_use(roblox_gamepass_id)
         system_id: int | None = None
 
         try:
             system_id = await self.database.insert(
                 """
-                INSERT INTO systems (name, description, image_path, file_path, paypal_link, roblox_gamepass_id, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO systems (
+                    name,
+                    description,
+                    image_path,
+                    file_path,
+                    paypal_link,
+                    roblox_gamepass_id,
+                    is_visible_on_website,
+                    is_for_sale,
+                    is_in_stock,
+                    website_price,
+                    website_currency,
+                    created_by
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name.strip(),
@@ -89,6 +120,11 @@ class SystemService:
                     self._serialize_storage_path(file_path),
                     paypal_link.strip() if paypal_link else None,
                     roblox_gamepass_id,
+                    is_visible_on_website,
+                    is_for_sale,
+                    is_in_stock,
+                    normalized_website_price,
+                    normalized_website_currency,
                     created_by,
                 ),
             )
@@ -140,6 +176,19 @@ class SystemService:
         rows = await self.database.fetchall("SELECT * FROM systems ORDER BY LOWER(name) ASC")
         return [self._map_system(row) for row in rows]
 
+    async def list_public_systems(self) -> list[SystemRecord]:
+        rows = await self.database.fetchall(
+            """
+            SELECT *
+            FROM systems
+            WHERE COALESCE(is_visible_on_website, TRUE)
+              AND COALESCE(is_for_sale, TRUE)
+              AND COALESCE(is_in_stock, TRUE)
+            ORDER BY LOWER(name) ASC
+            """
+        )
+        return [self._map_system(row) for row in rows]
+
     async def list_paypal_enabled_systems(self) -> list[SystemRecord]:
         rows = await self.database.fetchall(
             "SELECT * FROM systems WHERE paypal_link IS NOT NULL AND paypal_link != '' ORDER BY LOWER(name) ASC"
@@ -184,6 +233,11 @@ class SystemService:
         description: str,
         paypal_link: str | None,
         roblox_gamepass_reference: str | None,
+        is_visible_on_website: bool | None = None,
+        is_for_sale: bool | None = None,
+        is_in_stock: bool | None = None,
+        website_price: str | None = None,
+        website_currency: str | None = None,
         file_upload: tuple[str, bytes] | None = None,
         image_upload: tuple[str, bytes] | None = None,
         clear_image: bool = False,
@@ -213,6 +267,13 @@ class SystemService:
         roblox_gamepass_id = self.normalize_gamepass_reference(roblox_gamepass_reference)
         await self._ensure_gamepass_not_in_use(roblox_gamepass_id, exclude_system_id=system_id)
         cleaned_paypal_link = paypal_link.strip() if paypal_link else None
+        next_is_visible_on_website = current.is_visible_on_website if is_visible_on_website is None else is_visible_on_website
+        next_is_for_sale = current.is_for_sale if is_for_sale is None else is_for_sale
+        next_is_in_stock = current.is_in_stock if is_in_stock is None else is_in_stock
+        next_website_price = current.website_price if website_price is None else self.normalize_website_price(website_price)
+        next_website_currency = (
+            current.website_currency if website_currency is None else self.normalize_website_currency(website_currency)
+        )
 
         try:
             await self.database.execute(
@@ -223,7 +284,12 @@ class SystemService:
                     file_path = ?,
                     image_path = ?,
                     paypal_link = ?,
-                    roblox_gamepass_id = ?
+                    roblox_gamepass_id = ?,
+                    is_visible_on_website = ?,
+                    is_for_sale = ?,
+                    is_in_stock = ?,
+                    website_price = ?,
+                    website_currency = ?
                 WHERE id = ?
                 """,
                 (
@@ -233,6 +299,11 @@ class SystemService:
                     next_image_path,
                     cleaned_paypal_link,
                     roblox_gamepass_id,
+                    next_is_visible_on_website,
+                    next_is_for_sale,
+                    next_is_in_stock,
+                    next_website_price,
+                    next_website_currency,
                     system_id,
                 ),
             )
@@ -391,10 +462,43 @@ class SystemService:
             color=discord.Color.blue(),
         )
         embed.add_field(name="איידי של המערכת", value=str(system.id), inline=True)
+        embed.add_field(
+            name="מחיר באתר",
+            value=(f"{system.website_price} {system.website_currency}" if system.website_price else "לא מוגדר"),
+            inline=True,
+        )
         embed.add_field(name="פייפאל", value=system.paypal_link or "לא מוגדר", inline=False)
         embed.add_field(name="גיימפאס רובקס", value=self.gamepass_url_for_id(system.roblox_gamepass_id) or "לא מוגדר", inline=False)
         embed.set_footer(text="Magic System's")
         return embed
+
+    @staticmethod
+    def normalize_website_price(price_value: str | None) -> str | None:
+        if price_value is None:
+            return None
+
+        cleaned = str(price_value).strip().replace(",", "")
+        if not cleaned:
+            return None
+
+        try:
+            amount = Decimal(cleaned)
+        except InvalidOperation as exc:
+            raise PermissionDeniedError("מחיר האתר חייב להיות מספר תקין.") from exc
+
+        if amount <= 0:
+            raise PermissionDeniedError("מחיר האתר חייב להיות גדול מאפס.")
+
+        return format(amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
+
+    @staticmethod
+    def normalize_website_currency(currency_value: str | None) -> str:
+        cleaned = str(currency_value or "USD").strip().upper()
+        if not cleaned:
+            return "USD"
+        if not re.fullmatch(r"[A-Z]{3}", cleaned):
+            raise PermissionDeniedError("מטבע האתר חייב להיות קוד בן 3 אותיות כמו USD או ILS.")
+        return cleaned
 
     @staticmethod
     def normalize_gamepass_reference(reference: str | None) -> str | None:
@@ -615,6 +719,7 @@ class SystemService:
 
     @staticmethod
     def _map_system(row: aiosqlite.Row) -> SystemRecord:
+        row_keys = set(row.keys())
         return SystemRecord(
             id=int(row["id"]),
             name=str(row["name"]),
@@ -623,6 +728,11 @@ class SystemService:
             image_path=str(row["image_path"]) if row["image_path"] else None,
             paypal_link=str(row["paypal_link"]) if row["paypal_link"] else None,
             roblox_gamepass_id=str(row["roblox_gamepass_id"]) if row["roblox_gamepass_id"] else None,
+            is_visible_on_website=bool(row["is_visible_on_website"]) if "is_visible_on_website" in row_keys else True,
+            is_for_sale=bool(row["is_for_sale"]) if "is_for_sale" in row_keys else True,
+            is_in_stock=bool(row["is_in_stock"]) if "is_in_stock" in row_keys else True,
+            website_price=(str(row["website_price"]) if "website_price" in row_keys and row["website_price"] else None),
+            website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "USD"),
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),
         )

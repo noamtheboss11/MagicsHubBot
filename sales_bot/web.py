@@ -20,22 +20,39 @@ from sales_bot.web_admin import (
 from sales_bot.web_portal import (
     account_payment_page,
     admin_admins_page,
+    admin_checkout_orders_page,
     admin_dashboard_page,
+    admin_discount_codes_page,
     admin_gamepasses_page,
+    admin_notifications_page,
     admin_settings_page,
     admin_systems_page,
+    blacklist_appeal_page,
     custom_order_detail_page,
     custom_orders_list_page,
     custom_orders_page,
+    owned_system_download_page,
+    public_system_detail_page,
+    public_systems_page,
     special_order_detail_page,
     special_orders_list_page,
+    special_systems_page,
     special_system_compose_page,
     special_system_edit_page,
     special_system_image_page,
     special_system_page,
+    system_image_page,
+    website_cart_page,
+    website_checkout_page,
+    website_home_page,
+    website_info_page,
+    website_inbox_page,
     website_callback,
     website_login,
     website_logout,
+    website_paypal_purchase_page,
+    website_profile_page,
+    website_vouches_page,
 )
 
 if TYPE_CHECKING:
@@ -48,13 +65,26 @@ LOGGER = logging.getLogger(__name__)
 def create_web_app(bot: "SalesBot") -> web.Application:
     app = web.Application()
     app["bot"] = bot
-    app.router.add_get("/", landing_page)
+    app.router.add_get("/", website_home_page)
+    app.router.add_get("/info", website_info_page)
     app.router.add_get("/privacy", privacy_page)
     app.router.add_get("/terms", terms_page)
     app.router.add_get("/health", healthcheck)
     app.router.add_get("/auth/discord/login", website_login)
     app.router.add_get("/auth/discord/callback", website_callback)
     app.router.add_get("/auth/logout", website_logout)
+    app.router.add_route("*", "/cart", website_cart_page)
+    app.router.add_route("*", "/checkout", website_checkout_page)
+    app.router.add_route("*", "/inbox", website_inbox_page)
+    app.router.add_route("*", "/profile", website_profile_page)
+    app.router.add_route("*", "/vouches", website_vouches_page)
+    app.router.add_get("/systems", public_systems_page)
+    app.router.add_get("/systems/{system_id:\\d+}", public_system_detail_page)
+    app.router.add_get("/systems/{system_id:\\d+}/buy/paypal", website_paypal_purchase_page)
+    app.router.add_get("/system-images/{system_id:\\d+}", system_image_page)
+    app.router.add_get("/downloads/{system_id:\\d+}", owned_system_download_page)
+    app.router.add_get("/special-systems", special_systems_page)
+    app.router.add_route("*", "/blacklist-appeal", blacklist_appeal_page)
     app.router.add_post("/api/roblox/game/bootstrap", roblox_game_bootstrap)
     app.router.add_get("/oauth/roblox/callback", roblox_callback)
     app.router.add_get("/oauth/roblox/owner/callback", roblox_owner_callback)
@@ -62,10 +92,13 @@ def create_web_app(bot: "SalesBot") -> web.Application:
     app.router.add_post("/webhooks/roblox/gamepass", roblox_gamepass_webhook)
     app.router.add_get("/admin", admin_dashboard_page)
     app.router.add_route("*", "/admin/admins", admin_admins_page)
+    app.router.add_route("*", "/admin/checkouts", admin_checkout_orders_page)
     app.router.add_route("*", "/admin/custom-orders", custom_orders_list_page)
     app.router.add_route("*", "/admin/custom-orders/{order_id:\\d+}", custom_order_detail_page)
+    app.router.add_route("*", "/admin/discount-codes", admin_discount_codes_page)
     app.router.add_route("*", "/admin/systems", admin_systems_page)
     app.router.add_route("*", "/admin/gamepasses", admin_gamepasses_page)
+    app.router.add_route("*", "/admin/notifications", admin_notifications_page)
     app.router.add_route("*", "/admin/settings", admin_settings_page)
     app.router.add_route("*", "/admin/special-systems", special_system_compose_page)
     app.router.add_route("*", "/admin/special-systems/{special_system_id:\\d+}/edit", special_system_edit_page)
@@ -298,48 +331,48 @@ async def landing_page(request: web.Request) -> web.Response:
 
 async def privacy_page(request: web.Request) -> web.Response:
     body = """
-    <div class="marketing-shell" dir="ltr">
+    <div class="marketing-shell" dir="rtl">
         <div class="marketing-hero">
-            <p class="eyebrow">Legal</p>
-            <h1>Privacy Policy</h1>
-            <p>Magic Systems Hub Bot stores only the operational data required to deliver server features and purchase flows.</p>
+            <p class="eyebrow">מידע משפטי</p>
+            <h1>מדיניות פרטיות</h1>
+            <p>Magic Studio's שומר רק את המידע התפעולי שנדרש להפעלת השירות, הרכישות ומסירת המערכות.</p>
         </div>
         <div class="marketing-panel copy-stack">
             <ul class="doc-list">
-                <li>Discord user IDs, system ownership records, blacklist entries, vouch records, and support-related metadata may be stored.</li>
-                <li>If Roblox OAuth is enabled, linked Roblox profile identifiers returned by Roblox may also be stored.</li>
-                <li>Uploaded system files are stored only for delivery to authorized buyers or staff-approved recipients.</li>
-                <li>Data is used strictly to provide bot features, payment handling flows, ownership tracking, and moderation actions.</li>
-                <li>No credentials are intentionally shared with third parties except where required by Roblox OAuth or payment providers.</li>
+                <li>ייתכן שיישמרו מזהי משתמש של דיסקורד, רשומות בעלות, נתוני תמיכה, בלאקליסט ודירוגים לצורך תפעול השירות.</li>
+                <li>אם חיבור רובלוקס פעיל, ייתכן שיישמרו גם פרטי הזיהוי הציבוריים שמוחזרים על ידי רובלוקס.</li>
+                <li>קבצי מערכות נשמרים רק לצורך מסירה לרוכשים מורשים או לצוות מאושר.</li>
+                <li>המידע משמש רק להפעלת הבוט, המעקב אחרי רכישות ומסירות, וניהול גישה.</li>
+                <li>לא נשתף פרטי גישה בכוונה עם צד שלישי, חוץ מחיבורים שנדרשים על ידי ספקי תשלום או OAuth.</li>
             </ul>
-            <p>By using the bot, you consent to this operational data processing for server management and purchase fulfillment.</p>
+            <p>השימוש בשירות מהווה הסכמה לעיבוד המידע התפעולי הזה לצורך ניהול השרת והשלמת הרכישות.</p>
         </div>
     </div>
     """
-    return html_response("Privacy Policy", body)
+    return html_response("מדיניות פרטיות", body)
 
 
 async def terms_page(request: web.Request) -> web.Response:
     body = """
-    <div class="marketing-shell" dir="ltr">
+    <div class="marketing-shell" dir="rtl">
         <div class="marketing-hero">
-            <p class="eyebrow">Legal</p>
-            <h1>Terms of Service</h1>
-            <p>These terms describe the expected use of the bot, website, and linked account flows.</p>
+            <p class="eyebrow">מידע משפטי</p>
+            <h1>תנאי שימוש</h1>
+            <p>התנאים האלה מתארים את אופן השימוש באתר, בבוט ובחיבורי החשבון השונים.</p>
         </div>
         <div class="marketing-panel copy-stack">
             <ul class="doc-list">
-                <li>Use of Magic Systems Hub Bot is limited to authorized server members and customers.</li>
-                <li>Attempting to abuse commands, payment flows, blacklist systems, or account-linking features may result in removal of access.</li>
-                <li>Digital system delivery is handled by Discord DM and may require open DMs or manual staff assistance.</li>
-                <li>Purchases are subject to server staff review, moderation rules, and any published refund policy.</li>
-                <li>Roblox account linking, if enabled, must be used only with accounts you control.</li>
+                <li>השימוש ב-Magic Studio's מיועד לחברי שרת ולקוחות מורשים בלבד.</li>
+                <li>ניסיון לנצל לרעה רכישות, פקודות, חיבורי חשבון או מערכות האתר עלול לגרום להסרת הגישה.</li>
+                <li>מסירת מערכות דיגיטליות יכולה להתבצע בדיסקורד או דרך האתר, לפי תהליך העבודה שנקבע.</li>
+                <li>הרכישות כפופות לכללי השרת, לבדיקת הצוות ולמדיניות החזר אם קיימת.</li>
+                <li>חיבור חשבון רובלוקס מותר רק עבור חשבונות שבשליטת המשתמש.</li>
             </ul>
-            <p>Continued use of the bot means you agree to these terms and any related server rules.</p>
+            <p>המשך שימוש בשירות אומר שאתה מסכים לתנאים האלה ולכללי השרת הנלווים.</p>
         </div>
     </div>
     """
-    return html_response("Terms of Service", body)
+    return html_response("תנאי שימוש", body)
 
 
 async def healthcheck(request: web.Request) -> web.Response:
