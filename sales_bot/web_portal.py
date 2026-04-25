@@ -1568,19 +1568,6 @@ async def website_checkout_page(request: web.Request) -> web.Response:
                             order.id,
                             format(code_discount_amount, "f"),
                         )
-                    if order.paypal_order_id:
-                        owner_lines.append(f"PayPal Order ID: {order.paypal_order_id}")
-                    owner_lines.append("מערכות:")
-                    owner_lines.extend(
-                        f"- {row['item'].system.name}: {_money_label(row['effective_price'], currency)}"
-                        for row in pricing_rows
-                    )
-                    owner_lines.append(f"קישור ניהול: {bot.settings.public_base_url}/admin/checkouts")
-                    await bot.services.payments.send_checkout_admin_notification(
-                        bot,
-                        title="הגיעה הזמנת קופה חדשה מהאתר",
-                        body="\n".join(owner_lines),
-                    )
                     await bot.services.cart.clear_cart(session.discord_user_id)
                     raise web.HTTPFound(order.paypal_approval_url or f"/checkout/paypal/return?order_id={order.id}")
 
