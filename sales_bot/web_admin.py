@@ -471,14 +471,6 @@ def admin_html_response(title: str, body: str) -> web.Response:
                     <span class="brand-mark__dot"></span>
                     <span>Magic Studio's<small>דף בית</small></span>
                 </a>
-                <div class="utility-actions">
-                    <span class="utility-label">תצוגה</span>
-                    <div class="theme-toolbar" role="group" aria-label="בחירת ערכת נושא">
-                        <button type="button" class="theme-pill" data-theme-mode="default">ברירת מחדל</button>
-                        <button type="button" class="theme-pill" data-theme-mode="dark">כהה</button>
-                        <button type="button" class="theme-pill" data-theme-mode="light">בהיר</button>
-                    </div>
-                </div>
             </div>
             <section class="shell">
                 {body}

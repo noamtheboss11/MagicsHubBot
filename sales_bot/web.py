@@ -18,6 +18,7 @@ from sales_bot.web_admin import (
     system_edit_page,
 )
 from sales_bot.web_portal import (
+    CUSTOM_ORDER_FORM_MAX_BYTES,
     account_payment_page,
     admin_admins_page,
     admin_blacklist_page,
@@ -66,7 +67,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_web_app(bot: "SalesBot") -> web.Application:
-    app = web.Application()
+    app = web.Application(client_max_size=CUSTOM_ORDER_FORM_MAX_BYTES)
     app["bot"] = bot
     app.router.add_get("/", website_home_page)
     app.router.add_get("/info", website_info_page)

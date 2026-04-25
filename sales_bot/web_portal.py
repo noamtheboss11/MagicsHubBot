@@ -110,6 +110,7 @@ ADMIN_NAV_SECTIONS = (
 PUBLIC_NAV_ITEMS = (
     ("דף הבית", "/"),
     ("מערכות", "/systems"),
+    ("הזמנות אישיות", "/custom-orders"),
     ("מערכות מיוחדות", "/special-systems"),
     ("דירוגים", "/vouches"),
     ("מידע", "/info"),
@@ -195,6 +196,10 @@ td strong { color: var(--text); }
 .slider-arrow.next { left: 14px; }
 .slider-count { position: absolute; left: 14px; bottom: 14px; padding: 6px 12px; border-radius: 999px; background: rgba(12, 20, 34, 0.72); color: #fff; font-size: 0.88rem; font-weight: 700; }
 .gallery-section { margin-top: 18px; }
+.upload-slot-list { display: flex; flex-direction: column; gap: 12px; }
+.upload-slot { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 18px; background: var(--surface-strong); border: 1px dashed var(--surface-border-strong); }
+.upload-slot.is-hidden { display: none; }
+.upload-slot strong { color: var(--text); font-size: 0.95rem; }
 .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .catalog-card { display: flex; flex-direction: column; gap: 16px; padding: 22px; border-radius: 22px; background: var(--surface-card); border: 1px solid var(--surface-border); box-shadow: var(--shadow-md); }
 .catalog-media { width: 100%; aspect-ratio: 16 / 10; border-radius: 18px; border: 1px solid var(--surface-border); background: var(--surface-strong); object-fit: cover; }
@@ -291,8 +296,38 @@ PORTAL_SCRIPT = """
         syncSlider(slider, currentIndex + step);
     });
 
+    const syncUploadSequence = (container) => {
+        const slots = Array.from(container.querySelectorAll('[data-upload-slot]'));
+        let highestFilled = -1;
+        slots.forEach((slot, index) => {
+            const input = slot.querySelector('input[type="file"]');
+            if (input && input.files && input.files.length > 0) {
+                highestFilled = index;
+            }
+        });
+        const visibleCount = Math.min(slots.length, Math.max(1, highestFilled + 2));
+        slots.forEach((slot, index) => {
+            slot.classList.toggle('is-hidden', index >= visibleCount);
+        });
+    };
+
+    document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== 'file') {
+            return;
+        }
+        const container = target.closest('[data-upload-sequence]');
+        if (!container) {
+            return;
+        }
+        syncUploadSequence(container);
+    });
+
     document.querySelectorAll('[data-slider]').forEach((slider) => {
         syncSlider(slider, Number(slider.dataset.index || '0'));
+    });
+    document.querySelectorAll('[data-upload-sequence]').forEach((container) => {
+        syncUploadSequence(container);
     });
 })();
 </script>
@@ -311,9 +346,20 @@ PAYMENT_METHOD_LABELS = {
     "paypal": "PayPal",
 }
 
+CUSTOM_ORDER_MAX_IMAGES = 5
+CUSTOM_ORDER_FORM_MAX_MB = 25
+CUSTOM_ORDER_FORM_MAX_BYTES = CUSTOM_ORDER_FORM_MAX_MB * 1024 * 1024
+
 
 def _page_response(title: str, body: str) -> web.Response:
     return admin_html_response(title, PORTAL_STYLE + body + PORTAL_SCRIPT)
+
+
+def _custom_order_upload_limit_message() -> str:
+    return (
+        f"אפשר להעלות עד {CUSTOM_ORDER_MAX_IMAGES} תמונות להזמנה אישית, "
+        f"וביחד עד {CUSTOM_ORDER_FORM_MAX_MB}MB. נסה להקטין את התמונות או להעלות פחות קבצים."
+    )
 
 
 def _theme_mode_from_request(request: web.Request) -> str:
@@ -904,9 +950,10 @@ async def website_home_page(request: web.Request) -> web.Response:
         <div class="hero-banner-card">
             <p class="eyebrow">Magic Studio's</p>
             <h2>ברוכים הבאים לאתר המכירות</h2>
-            <p>כאן אפשר לראות את המערכות, לעבור למסלולי רכישה, לעיין בדירוגים ולהיכנס לעמוד הפרופיל האישי שלך.</p>
+            <p>כאן אפשר לראות את המערכות, לשלוח הזמנה אישית, לעבור למסלולי רכישה, לעיין בדירוגים ולהיכנס לעמוד הפרופיל האישי שלך.</p>
             <div class="actions">
                 <a class="link-button" href="/systems">מעבר למערכות</a>
+                <a class="link-button ghost-button" href="/custom-orders">הזמנה אישית</a>
                 <a class="link-button ghost-button" href="/special-systems">מערכות מיוחדות</a>
             </div>
         </div>
@@ -942,6 +989,15 @@ async def website_home_page(request: web.Request) -> web.Response:
         <article class="catalog-card">
             <div class="catalog-meta">
                 <div>
+                    <h2>הזמנות אישיות</h2>
+                    <p>עמוד מסודר לשליחת בקשות מותאמות אישית עם פרטים, תקציב ותמונות לעיון האדמינים.</p>
+                </div>
+                <div class="actions"><a class="link-button" href="/custom-orders">לשליחת הזמנה אישית</a></div>
+            </div>
+        </article>
+        <article class="catalog-card">
+            <div class="catalog-meta">
+                <div>
                     <h2>דירוגים</h2>
                     <p>כל הדירוגים שכבר נשמרו במערכת מוצגים גם באתר בעמוד אחד.</p>
                 </div>
@@ -954,7 +1010,7 @@ async def website_home_page(request: web.Request) -> web.Response:
         session,
         current_path=request.path,
         title="אתר המכירות של Magic Studio's",
-        intro="מרכז אחד למערכות, מערכות מיוחדות, דירוגים והעמוד האישי שלך.",
+        intro="מרכז אחד למערכות, הזמנות אישיות, מערכות מיוחדות, דירוגים והעמוד האישי שלך.",
         login_path=request.path,
         section_label="דף הבית",
         content=content,
@@ -2822,7 +2878,7 @@ async def admin_notifications_page(request: web.Request) -> web.Response:
                     title=notification.title,
                     body=notification.body,
                     link_path=notification.link_path,
-                    message_override="יש לך הודעה חדשה",
+                    message_override="יש לך הודעה חדשה באתר. לך לבדוק אותה https://magicshubbot.onrender.com/inbox",
                 )
                 label = await _discord_user_label(bot, user_id)
                 notice = f"ההתראה נשלחה אל {label}." + (" נשלח גם DM." if dm_sent else " נשמרה רק במרכז ההתראות באתר.")
@@ -3686,6 +3742,8 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                     )
                     if image is not None
                 ]
+                if len(uploaded_images) > CUSTOM_ORDER_MAX_IMAGES:
+                    raise PermissionDeniedError(f"אפשר לצרף עד {CUSTOM_ORDER_MAX_IMAGES} תמונות להזמנה האישית.")
                 if not requested_item or not required_timeframe or not selected_payment_method or not offered_price or not roblox_username:
                     raise PermissionDeniedError("חובה למלא את כל השדות בטופס ההזמנה.")
 
@@ -3720,6 +3778,18 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                     content=_notice_html("ההזמנה נשלחה בהצלחה. נחזור אליך ב-DM אחרי שנבדוק אותה.", success=True) + success_html,
                 )
                 return _page_response("הזמנה אישית", body)
+            except web.HTTPRequestEntityTooLarge:
+                notice = _custom_order_upload_limit_message()
+                success = False
+                bot_ref, session = await _current_site_session(request)
+                bot = bot_ref
+            except ValueError as exc:
+                if "Maximum request body size" not in str(exc):
+                    raise
+                notice = _custom_order_upload_limit_message()
+                success = False
+                bot_ref, session = await _current_site_session(request)
+                bot = bot_ref
             except SalesBotError as exc:
                 notice = str(exc)
                 success = False
@@ -3729,6 +3799,15 @@ async def custom_orders_page(request: web.Request) -> web.Response:
         payment_methods_html = ''.join(
             f'<div class="price-item"><strong>{_escape(label)}</strong><span>אפשר לבחור בטופס</span></div>'
             for _key, label in bot.services.orders.available_payment_methods()
+        )
+        upload_fields_html = ''.join(
+            f'''
+            <label class="upload-slot{' is-hidden' if index > 0 else ''}" data-upload-slot>
+                <strong>תמונה {index + 1}</strong>
+                <input type="file" name="images" accept="image/*">
+            </label>
+            '''
+            for index in range(CUSTOM_ORDER_MAX_IMAGES)
         )
         connected_account_html = ''
         if session is not None:
@@ -3751,7 +3830,13 @@ async def custom_orders_page(request: web.Request) -> web.Response:
                         <label class="field"><span>איך אתה משלם</span><select name="payment_method" required>{_order_payment_method_select_options(bot.services.orders, selected_payment_method)}</select></label>
                         <label class="field field-wide"><span>כמה אתה מוכן לשלם (או מה אתה מביא אם זה דברים במשחק)</span><textarea name="offered_price" required>{_escape(offered_price)}</textarea></label>
                         <label class="field"><span>מה השם שלך ברובלוקס</span><input type="text" name="roblox_username" value="{_escape(roblox_username)}" required></label>
-                        <label class="field field-wide"><span>תמונות לעיון האדמינים</span><input type="file" name="images" accept="image/*" multiple></label>
+                        <div class="field field-wide">
+                            <span>תמונות לעיון האדמינים</span>
+                            <div class="upload-slot-list" data-upload-sequence>
+                                {upload_fields_html}
+                            </div>
+                            <p class="setting-hint">אפשר להעלות עד {CUSTOM_ORDER_MAX_IMAGES} תמונות. כל בחירה תפתח שדה נוסף, וביחד אפשר לשלוח עד {CUSTOM_ORDER_FORM_MAX_MB}MB.</p>
+                        </div>
                     </div>
                     <div class="actions"><button type="submit">שלח הזמנה</button></div>
                 </form>
