@@ -197,7 +197,7 @@ class DiscountService:
             is_for_sale=bool(row["system_is_for_sale"]),
             is_in_stock=bool(row["system_is_in_stock"]),
             website_price=str(row["system_website_price"]) if row["system_website_price"] else None,
-            website_currency=str(row["system_website_currency"] or "USD").upper(),
+            website_currency=str(row["system_website_currency"] or "ILS").upper(),
             is_special_system=bool(row["system_is_special_system"]) if "system_is_special_system" in row_keys else False,
             created_by=int(row["system_created_by"]) if row["system_created_by"] is not None else None,
             created_at=str(row["system_created_at"]),

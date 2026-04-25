@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS systems (
     is_for_sale BOOLEAN NOT NULL DEFAULT 1,
     is_in_stock BOOLEAN NOT NULL DEFAULT 1,
     website_price TEXT,
-    website_currency TEXT NOT NULL DEFAULT 'USD',
+    website_currency TEXT NOT NULL DEFAULT 'ILS',
     is_special_system BOOLEAN NOT NULL DEFAULT 0,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

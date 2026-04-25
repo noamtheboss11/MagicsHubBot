@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
+SUPPORTED_WEBSITE_CURRENCIES = ("ILS", "USD")
+DEFAULT_WEBSITE_CURRENCY = "ILS"
 
 POLL_FORM_SCRIPT = """
 <script>
@@ -927,7 +929,7 @@ def _system_values_from_record(system: Any) -> dict[str, Any]:
         "paypal_link": system.paypal_link or "",
         "roblox_gamepass": system.roblox_gamepass_id or "",
         "website_price": system.website_price or "",
-        "website_currency": system.website_currency or "USD",
+        "website_currency": system.website_currency or DEFAULT_WEBSITE_CURRENCY,
         "is_visible_on_website": system.is_visible_on_website,
         "is_for_sale": system.is_for_sale,
         "is_in_stock": system.is_in_stock,
@@ -944,7 +946,7 @@ def _extract_system_form_values(post_data: Any) -> dict[str, Any]:
         "paypal_link": str(post_data.get("paypal_link", "")),
         "roblox_gamepass": str(post_data.get("roblox_gamepass", "")),
         "website_price": str(post_data.get("website_price", "")),
-        "website_currency": str(post_data.get("website_currency", "USD")),
+        "website_currency": str(post_data.get("website_currency", DEFAULT_WEBSITE_CURRENCY)),
         "is_visible_on_website": str(post_data.get("is_visible_on_website", "")).lower() in {"1", "true", "yes", "on"},
         "is_for_sale": str(post_data.get("is_for_sale", "")).lower() in {"1", "true", "yes", "on"},
         "is_in_stock": str(post_data.get("is_in_stock", "")).lower() in {"1", "true", "yes", "on"},
@@ -975,6 +977,15 @@ def _extract_uploads(fields: list[Any], *, image_only: bool = False) -> list[tup
             continue
         uploads.append((field.filename, payload, field.content_type))
     return uploads
+
+def _website_currency_options(selected_currency: str | None) -> str:
+    normalized = str(selected_currency or DEFAULT_WEBSITE_CURRENCY).strip().upper()
+    if normalized not in SUPPORTED_WEBSITE_CURRENCIES:
+        normalized = DEFAULT_WEBSITE_CURRENCY
+    return "".join(
+        f'<option value="{currency}"{" selected" if currency == normalized else ""}>{currency}</option>'
+        for currency in SUPPORTED_WEBSITE_CURRENCIES
+    )
 
 
 def _render_system_form(
@@ -1018,7 +1029,7 @@ def _render_system_form(
             </label>
             <label class="field">
                 <span>מטבע</span>
-                <input type="text" name="website_currency" maxlength="3" placeholder="USD" value="{_escape(values['website_currency'])}">
+                <select name="website_currency">{_website_currency_options(values['website_currency'])}</select>
             </label>
             <label class="field">
                 <span>החלפת קובץ מערכת</span>
@@ -1128,7 +1139,7 @@ async def system_edit_page(request: web.Request) -> web.Response:
                     paypal_link=values["paypal_link"] or None,
                     roblox_gamepass_reference=values["roblox_gamepass"] or None,
                     website_price=values["website_price"] or None,
-                    website_currency=values["website_currency"] or "USD",
+                    website_currency=values["website_currency"] or DEFAULT_WEBSITE_CURRENCY,
                     is_visible_on_website=bool(values["is_visible_on_website"]),
                     is_for_sale=bool(values["is_for_sale"]),
                     is_in_stock=bool(values["is_in_stock"]),

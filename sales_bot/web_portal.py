@@ -43,6 +43,7 @@ from sales_bot.web_admin import (
     _list_text_channels,
     _message_link,
     _render_channel_options,
+    _website_currency_options,
     admin_html_response,
 )
 
@@ -807,11 +808,11 @@ def _paypal_status_label(status: str) -> str:
 
 def _cart_currency(items: list[CartItemRecord]) -> str:
     if not items:
-        return "USD"
+        return "ILS"
     currencies = {item.system.website_currency.upper() for item in items if item.system.website_currency}
     if len(currencies) > 1:
         raise PermissionDeniedError("כרגע אי אפשר לבצע קופה אחת למערכות עם כמה מטבעות שונים.")
-    return next(iter(currencies), "USD")
+    return next(iter(currencies), "ILS")
 
 
 def _effective_system_price(system: SystemRecord, personal_discount_percent: int | None = None) -> Decimal:
@@ -3224,7 +3225,7 @@ async def admin_discount_codes_page(request: web.Request) -> web.Response:
                         <label class="field"><span>קוד</span><input type="text" name="code" maxlength="32" required></label>
                         <label class="field"><span>סוג</span><select name="discount_type"><option value="percent">אחוזים</option><option value="fixed">סכום קבוע</option></select></label>
                         <label class="field"><span>ערך</span><input type="text" name="amount" inputmode="decimal" required></label>
-                        <label class="field"><span>מטבע</span><input type="text" name="currency" maxlength="3" placeholder="USD"></label>
+                        <label class="field"><span>מטבע</span><select name="currency">{_website_currency_options("ILS")}</select></label>
                         <label class="field field-wide"><span>תיאור</span><textarea name="description"></textarea></label>
                         <label class="field"><span>מערכת ספציפית</span><select name="system_id">{_system_options(systems, None)}</select></label>
                         <label class="field"><span>מגבלת שימוש כוללת</span><input type="number" min="1" name="max_redemptions"></label>
@@ -3362,7 +3363,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                     paypal_link=str(form.get("paypal_link", "")).strip() or None,
                     roblox_gamepass_reference=str(form.get("roblox_gamepass", "")).strip() or None,
                     website_price=str(form.get("website_price", "")).strip() or None,
-                    website_currency=str(form.get("website_currency", "USD")).strip() or "USD",
+                    website_currency=str(form.get("website_currency", "ILS")).strip() or "ILS",
                     is_visible_on_website=str(form.get("is_visible_on_website", "")).strip().lower() in {"1", "true", "yes", "on"},
                     is_for_sale=str(form.get("is_for_sale", "")).strip().lower() in {"1", "true", "yes", "on"},
                     is_in_stock=str(form.get("is_in_stock", "")).strip().lower() in {"1", "true", "yes", "on"},
@@ -3426,7 +3427,7 @@ async def admin_systems_page(request: web.Request) -> web.Response:
                         <label class="field"><span>קישור פייפאל ישיר (ישן, אופציונלי)</span><input type="url" name="paypal_link"></label>
                         <label class="field"><span>גיימפאס רובקס</span><input type="text" name="roblox_gamepass"></label>
                         <label class="field"><span>מחיר באתר / לקופת PayPal</span><input type="text" name="website_price" inputmode="decimal" placeholder="19.99"></label>
-                        <label class="field"><span>מטבע</span><input type="text" name="website_currency" maxlength="3" value="USD"></label>
+                        <label class="field"><span>מטבע</span><select name="website_currency">{_website_currency_options("ILS")}</select></label>
                         <label class="field"><span>קובץ מערכת</span><input type="file" name="file" required></label>
                         <label class="field"><span>תמונות</span><input type="file" name="images" accept="image/*" multiple></label>
                         <label class="meta-card check-card"><span class="check-line"><input type="checkbox" name="is_visible_on_website" value="true" checked><strong>להציג את המערכת באתר</strong></span></label>

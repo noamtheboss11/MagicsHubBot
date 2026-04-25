@@ -103,7 +103,7 @@ class CartService:
                 is_for_sale=bool(row["is_for_sale"]) if "is_for_sale" in row_keys else True,
                 is_in_stock=bool(row["is_in_stock"]) if "is_in_stock" in row_keys else True,
                 website_price=(str(row["website_price"]) if "website_price" in row_keys and row["website_price"] else None),
-                website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "USD"),
+                website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "ILS"),
                 is_special_system=bool(row["is_special_system"]) if "is_special_system" in row_keys else False,
                 created_by=int(row["created_by"]) if row["created_by"] is not None else None,
                 created_at=str(row["created_at"]),

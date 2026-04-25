@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS systems (
     is_for_sale BOOLEAN NOT NULL DEFAULT TRUE,
     is_in_stock BOOLEAN NOT NULL DEFAULT TRUE,
     website_price NUMERIC(12, 2),
-    website_currency TEXT NOT NULL DEFAULT 'USD',
+    website_currency TEXT NOT NULL DEFAULT 'ILS',
     is_special_system BOOLEAN NOT NULL DEFAULT FALSE,
     created_by BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -17,6 +17,10 @@ from sales_bot.models import SystemAssetRecord, SystemGalleryImageRecord, System
 from sales_bot.storage import remove_path, save_named_bytes, slugify
 
 
+SUPPORTED_WEBSITE_CURRENCIES = ("ILS", "USD")
+DEFAULT_WEBSITE_CURRENCY = "ILS"
+
+
 class SystemService:
     FILE_ASSET_TYPE = "file"
     IMAGE_ASSET_TYPE = "image"
@@ -40,7 +44,7 @@ class SystemService:
         is_for_sale: bool = True,
         is_in_stock: bool = True,
         website_price: str | None = None,
-        website_currency: str = "USD",
+        website_currency: str = DEFAULT_WEBSITE_CURRENCY,
         is_special_system: bool = False,
     ) -> SystemRecord:
         file_bytes = await file_attachment.read()
@@ -78,7 +82,7 @@ class SystemService:
         is_for_sale: bool = True,
         is_in_stock: bool = True,
         website_price: str | None = None,
-        website_currency: str = "USD",
+        website_currency: str = DEFAULT_WEBSITE_CURRENCY,
         is_special_system: bool = False,
     ) -> SystemRecord:
         folder = self.storage_root / f"{slugify(name)}-{uuid4().hex[:12]}"
@@ -571,11 +575,11 @@ class SystemService:
 
     @staticmethod
     def normalize_website_currency(currency_value: str | None) -> str:
-        cleaned = str(currency_value or "USD").strip().upper()
+        cleaned = str(currency_value or DEFAULT_WEBSITE_CURRENCY).strip().upper()
         if not cleaned:
-            return "USD"
-        if not re.fullmatch(r"[A-Z]{3}", cleaned):
-            raise PermissionDeniedError("מטבע האתר חייב להיות קוד בן 3 אותיות כמו USD או ILS.")
+            return DEFAULT_WEBSITE_CURRENCY
+        if cleaned not in SUPPORTED_WEBSITE_CURRENCIES:
+            raise PermissionDeniedError("מטבע האתר חייב להיות ILS או USD.")
         return cleaned
 
     @staticmethod
@@ -896,7 +900,7 @@ class SystemService:
             is_for_sale=bool(row["is_for_sale"]) if "is_for_sale" in row_keys else True,
             is_in_stock=bool(row["is_in_stock"]) if "is_in_stock" in row_keys else True,
             website_price=(str(row["website_price"]) if "website_price" in row_keys and row["website_price"] else None),
-            website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else "USD"),
+            website_currency=(str(row["website_currency"]).upper() if "website_currency" in row_keys and row["website_currency"] else DEFAULT_WEBSITE_CURRENCY),
             is_special_system=bool(row["is_special_system"]) if "is_special_system" in row_keys else False,
             created_by=int(row["created_by"]) if row["created_by"] is not None else None,
             created_at=str(row["created_at"]),

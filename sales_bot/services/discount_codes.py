@@ -11,6 +11,10 @@ from sales_bot.exceptions import AlreadyExistsError, NotFoundError, PermissionDe
 from sales_bot.models import CartItemRecord, DiscountCodeRecord
 
 
+SUPPORTED_DISCOUNT_CURRENCIES = {"ILS", "USD"}
+DEFAULT_DISCOUNT_CURRENCY = "ILS"
+
+
 class DiscountCodeService:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -188,11 +192,11 @@ class DiscountCodeService:
 
     @staticmethod
     def _normalize_currency(currency_text: str | None) -> str | None:
-        cleaned = str(currency_text or "").strip().upper()
+        cleaned = str(currency_text or DEFAULT_DISCOUNT_CURRENCY).strip().upper()
         if not cleaned:
-            return None
-        if not re.fullmatch(r"[A-Z]{3}", cleaned):
-            raise PermissionDeniedError("מטבע חייב להיות קוד בן 3 אותיות כמו USD או ILS.")
+            return DEFAULT_DISCOUNT_CURRENCY
+        if cleaned not in SUPPORTED_DISCOUNT_CURRENCIES:
+            raise PermissionDeniedError("מטבע חייב להיות ILS או USD.")
         return cleaned
 
     @staticmethod
