@@ -240,6 +240,23 @@ td strong { color: var(--text); }
 .profile-avatar { width: 74px; height: 74px; border-radius: 22px; object-fit: cover; border: 1px solid var(--surface-border-strong); background: var(--surface-strong); }
 .settings-list { display: flex; flex-direction: column; gap: 12px; }
 .setting-hint { margin: 0; }
+.robux-tool { position: fixed; right: 24px; bottom: 24px; z-index: 30; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+.robux-tool-toggle { padding: 12px 18px; border-radius: 999px; box-shadow: 0 18px 38px rgba(8, 16, 28, 0.24); }
+.robux-tool-panel { width: min(360px, calc(100vw - 32px)); padding: 18px; border-radius: 24px; background: rgba(20, 31, 45, 0.94); border: 1px solid var(--surface-border-strong); box-shadow: 0 24px 70px rgba(8, 16, 28, 0.3); backdrop-filter: blur(18px); }
+html[data-theme="light"] .robux-tool-panel { background: rgba(250, 252, 255, 0.96); }
+.robux-tool-panel[hidden] { display: none; }
+.robux-tool-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.robux-tool-header p { margin: 6px 0 0; font-size: 0.92rem; }
+.robux-tool-title { margin: 0; font-size: 1.02rem; }
+.robux-tool-close { padding: 10px 14px; box-shadow: none; }
+.robux-tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.robux-tool-grid .field { margin: 0; }
+.robux-tool-grid .field-wide { grid-column: 1 / -1; }
+.robux-result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.robux-result-card { padding: 12px 14px; border-radius: 18px; background: var(--surface-strong); border: 1px solid var(--surface-border); }
+.robux-result-card strong { display: block; margin-bottom: 6px; font-size: 1rem; }
+.robux-result-card span { display: block; color: var(--muted); font-size: 0.88rem; }
+.robux-tool-footer { margin: 14px 0 0; font-size: 0.84rem; }
 @media (max-width: 1100px) {
     .admin-sidebar-card { position: static; }
     .profile-grid { grid-template-columns: 1fr; }
@@ -263,6 +280,10 @@ td strong { color: var(--text); }
     .profile-hero { flex-direction: column; align-items: flex-start; }
     .price-item { flex-direction: column; }
     .admin-hero { padding: 24px 22px 30px; }
+    .robux-tool { right: 16px; bottom: 16px; left: 16px; align-items: stretch; }
+    .robux-tool-toggle { width: 100%; justify-content: center; }
+    .robux-tool-panel { width: 100%; }
+    .robux-tool-grid, .robux-result-grid { grid-template-columns: 1fr; }
 }
 </style>
 """
@@ -333,6 +354,134 @@ PORTAL_SCRIPT = """
     });
     document.querySelectorAll('[data-upload-sequence]').forEach((container) => {
         syncUploadSequence(container);
+    });
+
+    document.querySelectorAll('[data-robux-tool]').forEach((tool) => {
+        const toggleButton = tool.querySelector('[data-robux-toggle]');
+        const panel = tool.querySelector('[data-robux-panel]');
+        if (!(toggleButton instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) {
+            return;
+        }
+
+        const robuxInput = panel.querySelector('[data-robux-input]');
+        const feeInput = panel.querySelector('[data-robux-fee]');
+        const usdRateInput = panel.querySelector('[data-usd-rate]');
+        const ilsRateInput = panel.querySelector('[data-ils-rate]');
+        const grossUsdOutput = panel.querySelector('[data-robux-gross-usd]');
+        const grossIlsOutput = panel.querySelector('[data-robux-gross-ils]');
+        const netRobuxOutput = panel.querySelector('[data-robux-net]');
+        const netUsdOutput = panel.querySelector('[data-robux-net-usd]');
+        const netIlsOutput = panel.querySelector('[data-robux-net-ils]');
+        const storageKey = 'magic-admin-robux-calculator';
+
+        const parseValue = (input, fallback) => {
+            if (!(input instanceof HTMLInputElement)) {
+                return fallback;
+            }
+            const parsed = Number.parseFloat(input.value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+        };
+
+        const formatNumber = (value, digits = 2) => new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: digits,
+            maximumFractionDigits: digits,
+        }).format(Number.isFinite(value) ? value : 0);
+
+        const syncToggleState = (isOpen) => {
+            toggleButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            panel.hidden = !isOpen;
+        };
+
+        const loadState = () => {
+            try {
+                const raw = window.localStorage.getItem(storageKey);
+                if (!raw) {
+                    return;
+                }
+                const state = JSON.parse(raw);
+                if (robuxInput instanceof HTMLInputElement && typeof state.robux === 'string') {
+                    robuxInput.value = state.robux;
+                }
+                if (feeInput instanceof HTMLInputElement && typeof state.fee === 'string') {
+                    feeInput.value = state.fee;
+                }
+                if (usdRateInput instanceof HTMLInputElement && typeof state.usdRate === 'string') {
+                    usdRateInput.value = state.usdRate;
+                }
+                if (ilsRateInput instanceof HTMLInputElement && typeof state.ilsRate === 'string') {
+                    ilsRateInput.value = state.ilsRate;
+                }
+            } catch (_error) {
+                return;
+            }
+        };
+
+        const saveState = () => {
+            try {
+                window.localStorage.setItem(storageKey, JSON.stringify({
+                    robux: robuxInput instanceof HTMLInputElement ? robuxInput.value : '',
+                    fee: feeInput instanceof HTMLInputElement ? feeInput.value : '',
+                    usdRate: usdRateInput instanceof HTMLInputElement ? usdRateInput.value : '',
+                    ilsRate: ilsRateInput instanceof HTMLInputElement ? ilsRateInput.value : '',
+                }));
+            } catch (_error) {
+                return;
+            }
+        };
+
+        const updateResults = () => {
+            const robux = Math.max(parseValue(robuxInput, 0), 0);
+            const feePercent = Math.min(Math.max(parseValue(feeInput, 30), 0), 100);
+            const usdPerRobux = Math.max(parseValue(usdRateInput, 0.0035), 0);
+            const ilsPerUsd = Math.max(parseValue(ilsRateInput, 3.65), 0);
+            const grossUsd = robux * usdPerRobux;
+            const grossIls = grossUsd * ilsPerUsd;
+            const netRobux = robux * (1 - (feePercent / 100));
+            const netUsd = netRobux * usdPerRobux;
+            const netIls = netUsd * ilsPerUsd;
+
+            if (grossUsdOutput) {
+                grossUsdOutput.textContent = `${formatNumber(grossUsd)} USD`;
+            }
+            if (grossIlsOutput) {
+                grossIlsOutput.textContent = `${formatNumber(grossIls)} ILS`;
+            }
+            if (netRobuxOutput) {
+                netRobuxOutput.textContent = `${formatNumber(netRobux, 0)} Robux`;
+            }
+            if (netUsdOutput) {
+                netUsdOutput.textContent = `${formatNumber(netUsd)} USD`;
+            }
+            if (netIlsOutput) {
+                netIlsOutput.textContent = `${formatNumber(netIls)} ILS`;
+            }
+            saveState();
+        };
+
+        loadState();
+        updateResults();
+        syncToggleState(false);
+
+        toggleButton.addEventListener('click', () => {
+            syncToggleState(panel.hidden);
+        });
+
+        panel.querySelectorAll('input').forEach((input) => {
+            input.addEventListener('input', updateResults);
+        });
+
+        const closeButton = panel.querySelector('[data-robux-close]');
+        if (closeButton instanceof HTMLButtonElement) {
+            closeButton.addEventListener('click', () => {
+                syncToggleState(false);
+            });
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                syncToggleState(false);
+            }
+        });
     });
 })();
 </script>
@@ -453,6 +602,64 @@ def _theme_options(selected_theme: str) -> str:
     )
 
 
+def _admin_robux_calculator_html() -> str:
+    return """
+    <div class="robux-tool" data-robux-tool>
+        <button type="button" class="robux-tool-toggle" data-robux-toggle aria-expanded="false">מחשבון Robux</button>
+        <section class="robux-tool-panel" data-robux-panel hidden>
+            <div class="robux-tool-header">
+                <div>
+                    <h2 class="robux-tool-title">Robux -> USD / ILS</h2>
+                    <p>מחשבון מהיר לערך ברוטו ונטו אחרי עמלת Roblox.</p>
+                </div>
+                <button type="button" class="ghost-button robux-tool-close" data-robux-close>סגור</button>
+            </div>
+            <div class="robux-tool-grid">
+                <label class="field field-wide">
+                    <span>כמות Robux</span>
+                    <input type="number" min="0" step="1" value="1000" inputmode="numeric" data-robux-input>
+                </label>
+                <label class="field">
+                    <span>עמלת Roblox %</span>
+                    <input type="number" min="0" max="100" step="0.01" value="30" inputmode="decimal" data-robux-fee>
+                </label>
+                <label class="field">
+                    <span>USD לכל 1 Robux</span>
+                    <input type="number" min="0" step="0.0001" value="0.0035" inputmode="decimal" data-usd-rate>
+                </label>
+                <label class="field field-wide">
+                    <span>ILS לכל 1 USD</span>
+                    <input type="number" min="0" step="0.01" value="3.65" inputmode="decimal" data-ils-rate>
+                </label>
+            </div>
+            <div class="robux-result-grid">
+                <div class="robux-result-card">
+                    <strong data-robux-gross-usd>0.00 USD</strong>
+                    <span>ערך ברוטו בדולר</span>
+                </div>
+                <div class="robux-result-card">
+                    <strong data-robux-gross-ils>0.00 ILS</strong>
+                    <span>ערך ברוטו בשקל</span>
+                </div>
+                <div class="robux-result-card">
+                    <strong data-robux-net>0 Robux</strong>
+                    <span>Robux נטו אחרי עמלה</span>
+                </div>
+                <div class="robux-result-card">
+                    <strong data-robux-net-usd>0.00 USD</strong>
+                    <span>ערך נטו בדולר</span>
+                </div>
+                <div class="robux-result-card">
+                    <strong data-robux-net-ils>0.00 ILS</strong>
+                    <span>ערך נטו בשקל</span>
+                </div>
+            </div>
+            <p class="muted robux-tool-footer">ברירת המחדל מבוססת על שער DevEx של 0.0035 USD לכל Robux, ואפשר לשנות כל שדה לפי החישוב שאתה צריך.</p>
+        </section>
+    </div>
+    """
+
+
 def _admin_shell(
     session: WebsiteSessionRecord,
     *,
@@ -493,6 +700,7 @@ def _admin_shell(
                 {content}
             </div>
         </div>
+        {_admin_robux_calculator_html()}
     </div>
     """
 
