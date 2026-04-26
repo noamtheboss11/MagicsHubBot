@@ -60,6 +60,7 @@ from sales_bot.web_portal import (
     website_paypal_purchase_page,
     website_paypal_return_page,
     website_profile_page,
+    website_vouches_page,
 )
 
 if TYPE_CHECKING:
